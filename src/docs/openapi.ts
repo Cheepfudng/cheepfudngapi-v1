@@ -13,6 +13,14 @@ export const openApiDocument = {
       url: 'http://localhost:5000/v1', // Base path for API endpoints
       description: 'Local Development Server',
     },
+    {
+      url: 'https://cheepfud-api-staging.onrender.com/v1',
+      description: 'Staging Server',
+    },
+    {
+      url: 'https://cheepfud-api-ng.onrender.com/v1',
+      description: 'Production Server',
+    },
   ],
   tags: [
     {

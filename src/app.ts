@@ -78,7 +78,7 @@ app.get('/health', (_req: Request, res: Response) => {
 });
 
 // API root
-app.get(`/${env.API_VERSION}`, (_req: Request, res: Response) => {
+app.get(`/`, (_req: Request, res: Response) => {
   res.status(200).json({
     status: true,
     message: 'Welcome to Cheepfud API',

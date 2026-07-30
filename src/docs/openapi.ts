@@ -15,11 +15,11 @@ export const openApiDocument = {
     },
     {
       url: 'https://cheepfud-api-staging.onrender.com',
-      description: 'Staging Server',
+      description: 'Staging Server URL',
     },
     {
       url: 'https://cheepfud-api-ng.onrender.com',
-      description: 'Production Server',
+      description: 'Production Server URL',
     },
   ],
   tags: [

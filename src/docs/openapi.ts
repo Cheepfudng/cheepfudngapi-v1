@@ -14,11 +14,11 @@ export const openApiDocument = {
       description: 'Local Development Server',
     },
     {
-      url: 'https://cheepfud-api-staging.onrender.com/v1',
+      url: 'https://cheepfud-api-staging.onrender.com',
       description: 'Staging Server',
     },
     {
-      url: 'https://cheepfud-api-ng.onrender.com/v1',
+      url: 'https://cheepfud-api-ng.onrender.com',
       description: 'Production Server',
     },
   ],

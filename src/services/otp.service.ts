@@ -18,12 +18,34 @@ export class OtpService {
 
   async sendOtp(email: string, purpose: OtpPurpose = 'email_verification'): Promise<void> {
     const normalizedEmail = email.trim().toLowerCase();
+    const cooldownKey = `otp:cooldown:${purpose}:${normalizedEmail}`;
+
+    if (await this.otpStore.exists(cooldownKey)) {
+      throw new AppError(
+        'Please wait before requesting another OTP',
+        429,
+        ErrorCode.OTP_RESEND_COOLDOWN
+      );
+    }
 
     if (purpose === 'email_verification') {
       await this.userRepository.createIfNotExists(normalizedEmail);
     } else {
       const exists = await this.userRepository.existsByEmail(normalizedEmail);
-      if (!exists) return;
+      if (!exists) {
+        // Set the cooldown anyway so repeated requests for a non-existent
+        // email behave identically to a real one — no timing/pattern leak.
+        await this.otpStore.save(
+          cooldownKey,
+          {
+            code: '',
+            attempts: 0,
+            expiresAt: new Date(Date.now() + env.OTP_RESEND_COOLDOWN_SECONDS * 1000),
+          },
+          env.OTP_RESEND_COOLDOWN_SECONDS
+        );
+        return;
+      }
     }
 
     const code = generateOtp(env.OTP_LENGTH);
@@ -37,6 +59,16 @@ export class OtpService {
         expiresAt: new Date(Date.now() + env.OTP_EXPIRES_IN_MINUTES * 60 * 1000),
       },
       env.OTP_EXPIRES_IN_MINUTES * 60
+    );
+
+    await this.otpStore.save(
+      cooldownKey,
+      {
+        code: '',
+        attempts: 0,
+        expiresAt: new Date(Date.now() + env.OTP_RESEND_COOLDOWN_SECONDS * 1000),
+      },
+      env.OTP_RESEND_COOLDOWN_SECONDS
     );
 
     const subject =
@@ -53,7 +85,6 @@ export class OtpService {
       }),
     });
   }
-
   async verifyOtp(email: string, code: string, purpose: OtpPurpose = 'email_verification') {
     const normalizedEmail = email.trim().toLowerCase();
     const normalizedCode = code.trim();

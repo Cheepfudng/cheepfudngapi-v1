@@ -1,7 +1,13 @@
 import { Document, Schema, model } from 'mongoose';
 import bcrypt from 'bcryptjs';
 
-import { AccountType, OnboardingStatus, UserRole, VerificationStatus } from '../types/enums';
+import {
+  AccountType,
+  OnboardingStatus,
+  OrganizationType,
+  UserRole,
+  VerificationStatus,
+} from '../types/enums';
 
 export interface IUser extends Document {
   email: string;
@@ -11,7 +17,7 @@ export interface IUser extends Document {
   phoneNumber?: string;
 
   organizationName?: string;
-  organizationType?: string;
+  organizationType?: OrganizationType;
 
   password: string;
   passwordChangedAt?: Date;
@@ -94,7 +100,11 @@ const userSchema = new Schema<IUser>(
     },
 
     organizationName: { type: String, trim: true },
-    organizationType: { type: String, trim: true },
+    organizationType: {
+      type: String,
+      enum: Object.values(OrganizationType),
+      trim: true,
+    },
   },
   {
     timestamps: true,

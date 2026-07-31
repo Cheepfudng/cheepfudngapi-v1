@@ -1,6 +1,6 @@
 import { body } from 'express-validator';
 
-import { AccountType } from '../types/enums';
+import { AccountType, OrganizationType } from '../types/enums';
 import { passwordRules } from './common.validator';
 
 export const requestOtpValidation = [
@@ -39,7 +39,9 @@ export const organizationOnboardingValidation = [
 
   body('organizationName').trim().notEmpty().withMessage('Organization name is required'),
 
-  body('organizationType').trim().notEmpty().withMessage('Organization type is required'),
+  body('organizationType')
+    .isIn(Object.values(OrganizationType))
+    .withMessage('Invalid organization type'),
 
   body('phoneNumber')
     .trim()

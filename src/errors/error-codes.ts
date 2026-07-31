@@ -22,6 +22,7 @@ export const ErrorCode = {
   REFRESH_TOKEN_INVALID: 'REFRESH_TOKEN_INVALID',
   INVALID_CURRENT_PASSWORD: 'INVALID_CURRENT_PASSWORD',
   TOO_MANY_REQUESTS: 'TOO_MANY_REQUESTS',
+  DOCUMENT_UPLOAD_FAILED: 'DOCUMENT_UPLOAD_FAILED',
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];

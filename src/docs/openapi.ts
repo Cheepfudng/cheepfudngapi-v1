@@ -130,7 +130,7 @@ export const openApiDocument = {
         },
       },
     },
-    '/otp/request': {
+    '/v1/otp/request': {
       post: {
         tags: ['Onboarding'],
         summary: 'Request OTP',
@@ -220,7 +220,7 @@ export const openApiDocument = {
         },
       },
     },
-    '/otp/verify': {
+    '/v1/otp/verify': {
       post: {
         tags: ['Onboarding'],
         summary: 'Verify OTP',
@@ -374,7 +374,7 @@ export const openApiDocument = {
         },
       },
     },
-    '/onboarding/account-type': {
+    '/v1/onboarding/account-type': {
       post: {
         tags: ['Onboarding'],
         summary: 'Select account type',
@@ -547,7 +547,7 @@ export const openApiDocument = {
         },
       },
     },
-    '/onboarding/individual': {
+    '/v1/onboarding/individual': {
       post: {
         tags: ['Onboarding'],
         summary: 'Complete individual onboarding',
@@ -745,7 +745,7 @@ export const openApiDocument = {
         },
       },
     },
-    '/onboarding/organization': {
+    '/v1/onboarding/organization': {
       post: {
         tags: ['Onboarding'],
         summary: 'Complete organization onboarding',
@@ -947,7 +947,7 @@ export const openApiDocument = {
         },
       },
     },
-    '/auth/login': {
+    '/v1/auth/login': {
       post: {
         tags: ['Auth'],
         summary: 'Login',
@@ -1010,7 +1010,7 @@ export const openApiDocument = {
         },
       },
     },
-    '/auth/refresh': {
+    '/v1/auth/refresh': {
       post: {
         tags: ['Auth'],
         summary: 'Refresh access token',
@@ -1053,7 +1053,7 @@ export const openApiDocument = {
         },
       },
     },
-    '/auth/logout': {
+    '/v1/auth/logout': {
       post: {
         tags: ['Auth'],
         summary: 'Logout',
@@ -1085,7 +1085,7 @@ export const openApiDocument = {
         },
       },
     },
-    '/auth/me': {
+    '/v1/auth/me': {
       get: {
         tags: ['Auth'],
         summary: 'Get current user',
@@ -1106,7 +1106,7 @@ export const openApiDocument = {
         },
       },
     },
-    '/auth/forgot-password': {
+    '/v1/auth/forgot-password': {
       post: {
         tags: ['Auth'],
         summary: 'Request a password reset OTP',
@@ -1156,7 +1156,7 @@ export const openApiDocument = {
         },
       },
     },
-    '/auth/reset-password': {
+    '/v1/auth/reset-password': {
       post: {
         tags: ['Auth'],
         summary: 'Reset password using OTP',
@@ -1208,7 +1208,7 @@ export const openApiDocument = {
         },
       },
     },
-    '/auth/change-password': {
+    '/v1/auth/change-password': {
       post: {
         tags: ['Auth'],
         summary: 'Change password (authenticated)',

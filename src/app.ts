@@ -7,9 +7,12 @@ import otpRoutes from './routes/otp.routes';
 import onboardingRoutes from './routes/onboarding.routes';
 import { apiReference } from '@scalar/express-api-reference';
 import { openApiDocument } from './docs/openapi';
+import authRoutes from './routes/auth.routes';
+import adminRoutes from './routes/admin.routes';
 
 import { env } from './config/env';
 import { errorHandler } from './middleware/errorHandler';
+import organizationRoutes from './routes/organization.routes';
 
 const app: Application = express();
 
@@ -78,7 +81,7 @@ app.get('/health', (_req: Request, res: Response) => {
 });
 
 // API root
-app.get(`/${env.API_VERSION}`, (_req: Request, res: Response) => {
+app.get(`/`, (_req: Request, res: Response) => {
   res.status(200).json({
     status: true,
     message: 'Welcome to Cheepfud API',
@@ -89,6 +92,9 @@ app.get(`/${env.API_VERSION}`, (_req: Request, res: Response) => {
 app.use(`/${env.API_VERSION}/otp`, otpRoutes);
 
 app.use(`/${env.API_VERSION}/onboarding`, onboardingRoutes);
+app.use(`/${env.API_VERSION}/auth`, authRoutes);
+app.use(`/${env.API_VERSION}/organizations`, organizationRoutes);
+app.use(`/${env.API_VERSION}/admin`, adminRoutes);
 
 // 404 handler
 app.use((_req: Request, res: Response) => {

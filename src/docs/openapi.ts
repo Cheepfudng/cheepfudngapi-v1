@@ -1,5 +1,11 @@
 import { ErrorCode } from '../errors';
-import { AccountType, OnboardingStatus, UserRole, VerificationStatus } from '../types';
+import {
+  AccountType,
+  OnboardingStatus,
+  OrganizationType,
+  UserRole,
+  VerificationStatus,
+} from '../types';
 
 export const openApiDocument = {
   openapi: '3.0.3',
@@ -10,7 +16,7 @@ export const openApiDocument = {
   },
   servers: [
     {
-      url: 'http://localhost:5000/v1', // Base path for API endpoints
+      url: 'http://localhost:5000',
       description: 'Local Development Server',
     },
     {
@@ -31,7 +37,20 @@ export const openApiDocument = {
       name: 'Onboarding',
       description: 'User onboarding and account management',
     },
+    {
+      name: 'Auth',
+      description: 'Login, tokens, and password management',
+    },
+    {
+      name: 'Organizations',
+      description: 'Organization document upload and verification',
+    },
+    {
+      name: 'Admin',
+      description: 'Admin-only organization review endpoints',
+    },
   ],
+
   paths: {
     '/health': {
       get: {
@@ -118,7 +137,7 @@ export const openApiDocument = {
         },
       },
     },
-    '/otp/request': {
+    '/v1/otp/request': {
       post: {
         tags: ['Onboarding'],
         summary: 'Request OTP',
@@ -205,14 +224,32 @@ export const openApiDocument = {
               },
             },
           },
+          429: {
+            description: 'Too Many Requests',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+                examples: {
+                  OtpResendCooldown: {
+                    value: {
+                      status: false,
+                      message: 'Please wait before requesting another OTP',
+                      error: { code: ErrorCode.OTP_RESEND_COOLDOWN },
+                    },
+                  },
+                },
+              },
+            },
+          },
         },
       },
     },
-    '/otp/verify': {
+    '/v1/otp/verify': {
       post: {
         tags: ['Onboarding'],
         summary: 'Verify OTP',
-        description: 'Verifies the provided OTP for the given email address.',
+        description:
+          'Verifies the provided OTP for the given email address. Sets isEmailVerified to true; does not affect verificationStatus.',
         requestBody: {
           required: true,
           content: {
@@ -361,12 +398,12 @@ export const openApiDocument = {
         },
       },
     },
-    '/onboarding/account-type': {
+    '/v1/onboarding/account-type': {
       post: {
         tags: ['Onboarding'],
         summary: 'Select account type',
         description:
-          'Allows a verified user to select their account type (individual or organization).',
+          'Allows an email-verified user to select their account type (individual or organization). Assigns role: user for individual, role: organization for organization. verificationStatus remains pending at this stage.',
         requestBody: {
           required: true,
           content: {
@@ -400,7 +437,7 @@ export const openApiDocument = {
                   $ref: '#/components/schemas/UserSuccessResponse',
                 },
                 examples: {
-                  AccountTypeSelected: {
+                  IndividualAccountTypeSelected: {
                     value: {
                       status: true,
                       message: 'Account type selected successfully',
@@ -409,7 +446,25 @@ export const openApiDocument = {
                         email: 'test@example.com',
                         accountType: AccountType.INDIVIDUAL,
                         role: UserRole.USER,
-                        verificationStatus: VerificationStatus.VERIFIED,
+                        verificationStatus: VerificationStatus.PENDING,
+                        onboardingStatus: OnboardingStatus.ACCOUNT_TYPE_SELECTED,
+                        isEmailVerified: true,
+                        isActive: true,
+                        createdAt: '2023-01-01T10:00:00.000Z',
+                        updatedAt: '2023-01-01T10:05:00.000Z',
+                      },
+                    },
+                  },
+                  OrganizationAccountTypeSelected: {
+                    value: {
+                      status: true,
+                      message: 'Account type selected successfully',
+                      data: {
+                        _id: '60d0fe4f54e0d9001c23a4a2',
+                        email: 'org@example.com',
+                        accountType: AccountType.ORGANIZATION,
+                        role: UserRole.ORGANIZATION,
+                        verificationStatus: VerificationStatus.PENDING,
                         onboardingStatus: OnboardingStatus.ACCOUNT_TYPE_SELECTED,
                         isEmailVerified: true,
                         isActive: true,
@@ -516,11 +571,12 @@ export const openApiDocument = {
         },
       },
     },
-    '/onboarding/individual': {
+    '/v1/onboarding/individual': {
       post: {
         tags: ['Onboarding'],
         summary: 'Complete individual onboarding',
-        description: 'Completes the onboarding process for an individual user.',
+        description:
+          'Completes onboarding for an individual user and sets their password. verificationStatus is set to verified immediately — individuals do not require admin review.',
         requestBody: {
           required: true,
           content: {
@@ -535,6 +591,8 @@ export const openApiDocument = {
                     firstName: 'John',
                     lastName: 'Doe',
                     phoneNumber: '+1234567890',
+                    password: 'StrongPass123',
+                    confirmPassword: 'StrongPass123',
                   },
                 },
               },
@@ -591,6 +649,22 @@ export const openApiDocument = {
                         code: ErrorCode.VALIDATION_ERROR,
                         details: [
                           { msg: 'First name is required', path: 'firstName', location: 'body' },
+                        ],
+                      },
+                    },
+                  },
+                  PasswordMismatch: {
+                    value: {
+                      status: false,
+                      message: 'Passwords do not match',
+                      error: {
+                        code: ErrorCode.VALIDATION_ERROR,
+                        details: [
+                          {
+                            msg: 'Passwords do not match',
+                            path: 'confirmPassword',
+                            location: 'body',
+                          },
                         ],
                       },
                     },
@@ -695,11 +769,12 @@ export const openApiDocument = {
         },
       },
     },
-    '/onboarding/organization': {
+    '/v1/onboarding/organization': {
       post: {
         tags: ['Onboarding'],
         summary: 'Complete organization onboarding',
-        description: 'Completes the onboarding process for an organization user.',
+        description:
+          'Completes onboarding for an organization user and sets their password. verificationStatus remains pending after this step — organizations must submit documents and be approved by an admin before verificationStatus becomes verified.',
         requestBody: {
           required: true,
           content: {
@@ -711,9 +786,11 @@ export const openApiDocument = {
                 OrganizationOnboardingExample: {
                   value: {
                     email: 'org@example.com',
-                    organizationName: 'Acme Corp',
-                    organizationType: 'Technology',
+                    organizationName: 'Acme Farms',
+                    organizationType: 'Farmer/Vendor',
                     phoneNumber: '+1987654321',
+                    password: 'StrongPass123',
+                    confirmPassword: 'StrongPass123',
                   },
                 },
               },
@@ -736,12 +813,12 @@ export const openApiDocument = {
                       data: {
                         _id: '60d0fe4f54e0d9001c23a4a2',
                         email: 'org@example.com',
-                        organizationName: 'Acme Corp',
-                        organizationType: 'Technology',
+                        organizationName: 'Acme Farms',
+                        organizationType: 'Farmer/Vendor',
                         phoneNumber: '+1987654321',
                         accountType: AccountType.ORGANIZATION,
-                        role: UserRole.ADMIN,
-                        verificationStatus: VerificationStatus.VERIFIED,
+                        role: UserRole.ORGANIZATION,
+                        verificationStatus: VerificationStatus.PENDING,
                         onboardingStatus: OnboardingStatus.COMPLETED,
                         isEmailVerified: true,
                         isActive: true,
@@ -772,6 +849,22 @@ export const openApiDocument = {
                           {
                             msg: 'Organization name is required',
                             path: 'organizationName',
+                            location: 'body',
+                          },
+                        ],
+                      },
+                    },
+                  },
+                  PasswordMismatch: {
+                    value: {
+                      status: false,
+                      message: 'Passwords do not match',
+                      error: {
+                        code: ErrorCode.VALIDATION_ERROR,
+                        details: [
+                          {
+                            msg: 'Passwords do not match',
+                            path: 'confirmPassword',
                             location: 'body',
                           },
                         ],
@@ -878,8 +971,623 @@ export const openApiDocument = {
         },
       },
     },
+    '/v1/auth/login': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Login',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/LoginRequest' },
+              examples: {
+                LoginExample: {
+                  value: { email: 'test@example.com', password: 'StrongPass123' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'Login successful',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AuthSuccessResponse' },
+              },
+            },
+          },
+          401: {
+            description: 'Invalid credentials',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+                examples: {
+                  InvalidCredentials: {
+                    value: {
+                      status: false,
+                      message: 'Invalid email or password',
+                      error: { code: ErrorCode.INVALID_CREDENTIALS },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          403: {
+            description: 'Account deactivated',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+                examples: {
+                  AccountDeactivated: {
+                    value: {
+                      status: false,
+                      message: 'This account has been deactivated',
+                      error: { code: ErrorCode.ACCOUNT_DEACTIVATED },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/v1/auth/refresh': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Refresh access token',
+        description:
+          'Exchanges a valid refresh token for a new access + refresh token pair. The refresh token used in this request is invalidated (rotation).',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/RefreshRequest' },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'Token refreshed successfully',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/TokensSuccessResponse' },
+              },
+            },
+          },
+          401: {
+            description: 'Refresh token invalid or expired',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+                examples: {
+                  InvalidRefreshToken: {
+                    value: {
+                      status: false,
+                      message: 'Refresh token is invalid or expired',
+                      error: { code: ErrorCode.REFRESH_TOKEN_INVALID },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/v1/auth/logout': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Logout',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/RefreshRequest' },
+              examples: {
+                LogoutExample: { value: { refreshToken: '<refresh token>' } },
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'Logout successful',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/SuccessResponse' } },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/auth/me': {
+      get: {
+        tags: ['Auth'],
+        summary: 'Get current user',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: {
+            description: 'Current authenticated user',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/UserSuccessResponse' } },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/auth/forgot-password': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Request a password reset OTP',
+        description:
+          'Always returns the same generic success message, regardless of whether the email exists, to prevent account enumeration.',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/ForgotPasswordRequest' } },
+          },
+        },
+        responses: {
+          200: {
+            description: 'Generic success response',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/SuccessResponse' },
+                examples: {
+                  Generic: {
+                    value: {
+                      status: true,
+                      message: 'If an account exists for this email, a reset code has been sent',
+                      data: null,
+                    },
+                  },
+                },
+              },
+            },
+          },
+          429: {
+            description: 'Too many requests',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+                examples: {
+                  TooManyRequests: {
+                    value: {
+                      status: false,
+                      message: 'Too many requests, please try again later',
+                      error: { code: ErrorCode.TOO_MANY_REQUESTS },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/v1/auth/reset-password': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Reset password using OTP',
+        description:
+          'Resetting a password invalidates every existing session (refresh token) for the user.',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/ResetPasswordRequest' } },
+          },
+        },
+        responses: {
+          200: {
+            description: 'Password reset successful',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/SuccessResponse' } },
+            },
+          },
+          400: {
+            description: 'Invalid/expired OTP or password validation error',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+                examples: {
+                  InvalidOtp: {
+                    value: {
+                      status: false,
+                      message: 'Invalid OTP',
+                      error: { code: ErrorCode.INVALID_OTP },
+                    },
+                  },
+                  PasswordMismatch: {
+                    value: {
+                      status: false,
+                      message: 'Passwords do not match',
+                      error: { code: ErrorCode.VALIDATION_ERROR },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          429: {
+            description: 'Too many requests',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/auth/change-password': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Change password (authenticated)',
+        description:
+          'Requires the current password. Invalidates every other session but keeps the current one alive by issuing a fresh token pair.',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/ChangePasswordRequest' } },
+          },
+        },
+        responses: {
+          200: {
+            description: 'Password changed successfully',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/AuthSuccessResponse' } },
+            },
+          },
+          401: {
+            description: 'Not authenticated / current password incorrect',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+                examples: {
+                  WrongCurrentPassword: {
+                    value: {
+                      status: false,
+                      message: 'Current password is incorrect',
+                      error: { code: ErrorCode.INVALID_CURRENT_PASSWORD },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          429: {
+            description: 'Too many requests',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/organizations/document-catalog': {
+      get: {
+        tags: ['Organizations'],
+        summary: 'Get required documents for the current org',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: {
+            description: "Required document list for this org's category",
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/DocumentCatalogResponse' },
+              },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          400: {
+            description: 'Organization type not set',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/organizations/documents': {
+      post: {
+        tags: ['Organizations'],
+        summary: 'Upload verification documents',
+        description:
+          "A single submission must include every mandatory document type for the org's category (see /document-catalog). Sets verificationStatus to under_review on success.",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'multipart/form-data': {
+              schema: { $ref: '#/components/schemas/UploadDocumentsRequest' },
+            },
+          },
+        },
+        responses: {
+          201: {
+            description: 'Documents uploaded successfully',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/DocumentsSuccessResponse' },
+              },
+            },
+          },
+          400: {
+            description: 'Invalid or missing document types',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+                examples: {
+                  MissingRequired: {
+                    value: {
+                      status: false,
+                      message:
+                        'Missing required document(s): proof_of_address, business_registration',
+                      error: { code: ErrorCode.VALIDATION_ERROR },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          403: {
+            description: 'Not an organization account',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          409: {
+            description: 'Already verified',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/organizations/verification-status': {
+      get: {
+        tags: ['Organizations'],
+        summary: 'Get own verification status and submitted documents',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: {
+            description: 'Verification status retrieved',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/VerificationStatusResponse' },
+              },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/organizations/dashboard': {
+      get: {
+        tags: ['Organizations'],
+        summary: 'Organization dashboard (verified orgs only)',
+        description:
+          'Blocked with 403 for role: organization users whose verificationStatus is not verified.',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: {
+            description: 'Dashboard data',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/SuccessResponse' } },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          403: {
+            description: 'Organization not verified',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+                examples: {
+                  NotVerified: {
+                    value: {
+                      status: false,
+                      message:
+                        'Your organization is pending verification. Please complete document submission and wait for admin approval.',
+                      error: { code: ErrorCode.ORGANIZATION_NOT_VERIFIED },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/v1/admin/organizations': {
+      get: {
+        tags: ['Admin'],
+        summary: 'List organizations (admin only)',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'status',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', enum: Object.values(VerificationStatus) },
+            description: 'Filter by verificationStatus',
+          },
+        ],
+        responses: {
+          200: {
+            description: 'Organizations retrieved',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/OrganizationListResponse' },
+              },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          403: {
+            description: 'Not an admin',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/admin/organizations/{id}': {
+      get: {
+        tags: ['Admin'],
+        summary: 'Get organization detail + documents (admin only)',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          200: {
+            description: 'Organization detail retrieved',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/OrganizationDetailResponse' },
+              },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          403: {
+            description: 'Not an admin',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          404: {
+            description: 'Organization not found',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/admin/organizations/{id}/verify': {
+      put: {
+        tags: ['Admin'],
+        summary: 'Approve or reject an organization (admin only)',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/ReviewOrganizationRequest' },
+              examples: {
+                Approve: { value: { decision: 'approved' } },
+                Reject: {
+                  value: { decision: 'rejected', rejectionReason: 'Document image was unreadable' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'Organization reviewed',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/UserSuccessResponse' } },
+            },
+          },
+          400: {
+            description: 'rejectionReason required when rejecting',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+                examples: {
+                  MissingReason: {
+                    value: {
+                      status: false,
+                      message: 'rejectionReason is required when rejecting',
+                      error: { code: ErrorCode.VALIDATION_ERROR },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          403: {
+            description: 'Not an admin',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          404: {
+            description: 'Organization not found',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          409: {
+            description: 'Already verified',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
   },
   components: {
+    securitySchemes: {
+      bearerAuth: {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT',
+      },
+    },
     schemas: {
       HealthCheckResponse: {
         type: 'object',
@@ -892,33 +1600,17 @@ export const openApiDocument = {
       SuccessResponse: {
         type: 'object',
         properties: {
-          status: {
-            type: 'boolean',
-            example: true,
-          },
-          message: {
-            type: 'string',
-            example: 'Operation successful',
-          },
-          data: {
-            nullable: true,
-            // Can be any type, hence 'object' or specific schema reference
-            // For now, it's generic, but specific responses will override this.
-          },
+          status: { type: 'boolean', example: true },
+          message: { type: 'string', example: 'Operation successful' },
+          data: { nullable: true },
         },
         required: ['status', 'message', 'data'],
       },
       ErrorResponse: {
         type: 'object',
         properties: {
-          status: {
-            type: 'boolean',
-            example: false,
-          },
-          message: {
-            type: 'string',
-            example: 'An error occurred',
-          },
+          status: { type: 'boolean', example: false },
+          message: { type: 'string', example: 'An error occurred' },
           error: {
             type: 'object',
             properties: {
@@ -938,6 +1630,7 @@ export const openApiDocument = {
         },
         required: ['status', 'message', 'error'],
       },
+
       User: {
         type: 'object',
         properties: {
@@ -946,8 +1639,13 @@ export const openApiDocument = {
           firstName: { type: 'string', example: 'John', nullable: true },
           lastName: { type: 'string', example: 'Doe', nullable: true },
           phoneNumber: { type: 'string', example: '+1234567890', nullable: true },
-          organizationName: { type: 'string', example: 'Acme Corp', nullable: true },
-          organizationType: { type: 'string', example: 'Technology', nullable: true },
+          organizationName: { type: 'string', example: 'Acme Farms', nullable: true },
+          organizationType: {
+            type: 'string',
+            enum: Object.values(OrganizationType),
+            example: OrganizationType.FARMER,
+            nullable: true,
+          },
           accountType: {
             type: 'string',
             enum: Object.values(AccountType),
@@ -958,6 +1656,8 @@ export const openApiDocument = {
           verificationStatus: {
             type: 'string',
             enum: Object.values(VerificationStatus),
+            description:
+              'For role: organization, this reflects admin document-review status (pending → under_review → verified/rejected). For role: user, it is set to verified immediately upon completing onboarding.',
             example: VerificationStatus.VERIFIED,
           },
           onboardingStatus: {
@@ -988,9 +1688,7 @@ export const openApiDocument = {
           {
             type: 'object',
             properties: {
-              data: {
-                $ref: '#/components/schemas/User',
-              },
+              data: { $ref: '#/components/schemas/User' },
             },
           },
         ],
@@ -1063,7 +1761,7 @@ export const openApiDocument = {
       },
       IndividualOnboardingRequest: {
         type: 'object',
-        required: ['email', 'firstName', 'lastName', 'phoneNumber'],
+        required: ['email', 'firstName', 'lastName', 'phoneNumber', 'password', 'confirmPassword'],
         properties: {
           email: {
             type: 'string',
@@ -1087,11 +1785,32 @@ export const openApiDocument = {
             description: "User's phone number.",
             example: '+1234567890',
           },
+          password: {
+            type: 'string',
+            format: 'password',
+            minLength: 8,
+            description:
+              'Minimum 8 characters, at least one uppercase, one lowercase, and one number.',
+            example: 'StrongPass123',
+          },
+          confirmPassword: {
+            type: 'string',
+            format: 'password',
+            description: 'Must match password.',
+            example: 'StrongPass123',
+          },
         },
       },
       OrganizationOnboardingRequest: {
         type: 'object',
-        required: ['email', 'organizationName', 'organizationType', 'phoneNumber'],
+        required: [
+          'email',
+          'organizationName',
+          'organizationType',
+          'phoneNumber',
+          'password',
+          'confirmPassword',
+        ],
         properties: {
           email: {
             type: 'string',
@@ -1102,18 +1821,232 @@ export const openApiDocument = {
           organizationName: {
             type: 'string',
             description: 'Name of the organization.',
-            example: 'Acme Corp',
+            example: 'Acme Farms',
           },
           organizationType: {
             type: 'string',
-            description: 'Type of the organization (e.g., Technology, Retail).',
-            example: 'Technology',
+            description:
+              'Category of the organization (e.g., Farmer/Vendor, NGO, Foundation, Religious Body, Agency).',
+            example: 'Farmer/Vendor',
           },
           phoneNumber: {
             type: 'string',
             pattern: '^\\+?[1-9]\\d{7,14}$',
             description: 'Organization contact phone number.',
             example: '+1987654321',
+          },
+          password: {
+            type: 'string',
+            format: 'password',
+            minLength: 8,
+            description:
+              'Minimum 8 characters, at least one uppercase, one lowercase, and one number.',
+            example: 'StrongPass123',
+          },
+          confirmPassword: {
+            type: 'string',
+            format: 'password',
+            description: 'Must match password.',
+            example: 'StrongPass123',
+          },
+        },
+      },
+      LoginRequest: {
+        type: 'object',
+        required: ['email', 'password'],
+        properties: {
+          email: { type: 'string', format: 'email', example: 'test@example.com' },
+          password: { type: 'string', format: 'password', example: 'StrongPass123' },
+        },
+      },
+      RefreshRequest: {
+        type: 'object',
+        required: ['refreshToken'],
+        properties: {
+          refreshToken: { type: 'string', example: '<refresh token>' },
+        },
+      },
+      ForgotPasswordRequest: {
+        type: 'object',
+        required: ['email'],
+        properties: {
+          email: { type: 'string', format: 'email', example: 'test@example.com' },
+        },
+      },
+      ResetPasswordRequest: {
+        type: 'object',
+        required: ['email', 'code', 'password', 'confirmPassword'],
+        properties: {
+          email: { type: 'string', format: 'email', example: 'test@example.com' },
+          code: { type: 'string', pattern: '^[0-9]{6}$', example: '123456' },
+          password: {
+            type: 'string',
+            format: 'password',
+            minLength: 8,
+            example: 'NewStrongPass456',
+          },
+          confirmPassword: { type: 'string', format: 'password', example: 'NewStrongPass456' },
+        },
+      },
+      ChangePasswordRequest: {
+        type: 'object',
+        required: ['currentPassword', 'password', 'confirmPassword'],
+        properties: {
+          currentPassword: { type: 'string', format: 'password', example: 'NewStrongPass456' },
+          password: { type: 'string', format: 'password', minLength: 8, example: 'FinalPass789' },
+          confirmPassword: { type: 'string', format: 'password', example: 'FinalPass789' },
+        },
+      },
+      AuthTokens: {
+        type: 'object',
+        properties: {
+          accessToken: { type: 'string' },
+          refreshToken: { type: 'string' },
+        },
+        required: ['accessToken', 'refreshToken'],
+      },
+      AuthSuccessResponse: {
+        allOf: [
+          { $ref: '#/components/schemas/SuccessResponse' },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                allOf: [
+                  { $ref: '#/components/schemas/User' },
+                  { $ref: '#/components/schemas/AuthTokens' },
+                ],
+              },
+            },
+          },
+        ],
+      },
+      TokensSuccessResponse: {
+        allOf: [
+          { $ref: '#/components/schemas/SuccessResponse' },
+          {
+            type: 'object',
+            properties: { data: { $ref: '#/components/schemas/AuthTokens' } },
+          },
+        ],
+      },
+      UploadDocumentsRequest: {
+        type: 'object',
+        required: ['documents', 'documentTypes'],
+        properties: {
+          documents: {
+            type: 'array',
+            items: { type: 'string', format: 'binary' },
+            description: 'Up to 5 files (PDF, JPG, or PNG), max 10MB each.',
+          },
+          documentTypes: {
+            type: 'array',
+            items: { type: 'string' },
+            description:
+              "One documentType slug per file, same order as documents. Must all be valid for the org's category and cover every mandatory type in this one submission.",
+            example: ['government_id', 'proof_of_address', 'business_registration'],
+          },
+        },
+      },
+      VerificationDocument: {
+        type: 'object',
+        properties: {
+          _id: { type: 'string' },
+          user: { type: 'string' },
+          documentType: { type: 'string', example: 'government_id' },
+          fileUrl: { type: 'string', format: 'uri' },
+          publicId: { type: 'string' },
+          createdAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      DocumentsSuccessResponse: {
+        allOf: [
+          { $ref: '#/components/schemas/SuccessResponse' },
+          {
+            type: 'object',
+            properties: {
+              data: { type: 'array', items: { $ref: '#/components/schemas/VerificationDocument' } },
+            },
+          },
+        ],
+      },
+      VerificationStatusResponse: {
+        allOf: [
+          { $ref: '#/components/schemas/SuccessResponse' },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'object',
+                properties: {
+                  verificationStatus: { type: 'string', enum: Object.values(VerificationStatus) },
+                  documents: {
+                    type: 'array',
+                    items: { $ref: '#/components/schemas/VerificationDocument' },
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
+      DocumentCatalogEntry: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', example: 'government_id' },
+          label: { type: 'string' },
+          required: { type: 'boolean' },
+        },
+      },
+      DocumentCatalogResponse: {
+        allOf: [
+          { $ref: '#/components/schemas/SuccessResponse' },
+          {
+            type: 'object',
+            properties: {
+              data: { type: 'array', items: { $ref: '#/components/schemas/DocumentCatalogEntry' } },
+            },
+          },
+        ],
+      },
+      OrganizationListResponse: {
+        allOf: [
+          { $ref: '#/components/schemas/SuccessResponse' },
+          {
+            type: 'object',
+            properties: { data: { type: 'array', items: { $ref: '#/components/schemas/User' } } },
+          },
+        ],
+      },
+      OrganizationDetailResponse: {
+        allOf: [
+          { $ref: '#/components/schemas/SuccessResponse' },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'object',
+                properties: {
+                  organization: { $ref: '#/components/schemas/User' },
+                  documents: {
+                    type: 'array',
+                    items: { $ref: '#/components/schemas/VerificationDocument' },
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
+      ReviewOrganizationRequest: {
+        type: 'object',
+        required: ['decision'],
+        properties: {
+          decision: { type: 'string', enum: ['approved', 'rejected'], example: 'approved' },
+          rejectionReason: {
+            type: 'string',
+            description: 'Required when decision is rejected.',
+            example: 'Document image was unreadable',
           },
         },
       },

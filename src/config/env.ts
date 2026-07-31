@@ -80,6 +80,9 @@ export const env = {
   OTP_RESEND_COOLDOWN_SECONDS: getNumberEnv('OTP_RESEND_COOLDOWN_SECONDS', 60),
 
   LOG_LEVEL: getOptionalEnv('LOG_LEVEL', 'info'),
+  CLOUDINARY_CLOUD_NAME: getRequiredEnv('CLOUDINARY_CLOUD_NAME'),
+  CLOUDINARY_API_KEY: getRequiredEnv('CLOUDINARY_API_KEY'),
+  CLOUDINARY_API_SECRET: getRequiredEnv('CLOUDINARY_API_SECRET'),
 
   SENTRY_DSN: process.env.SENTRY_DSN?.trim() || undefined,
 } as const;

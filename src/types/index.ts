@@ -8,3 +8,4 @@ export interface ApiResponse<T = any> {
 export * from './api.types';
 export * from './enums';
 export * from './onboarding.types';
+export * from './auth.types';

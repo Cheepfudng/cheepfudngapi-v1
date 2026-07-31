@@ -1,4 +1,5 @@
 import { IUser, UserModel } from '../models/user.model';
+import { UserRole, VerificationStatus } from '../types';
 
 export class UserRepository {
   async findByEmail(email: string): Promise<IUser | null> {
@@ -36,9 +37,24 @@ export class UserRepository {
     });
   }
 
+  async save(user: IUser): Promise<IUser> {
+    return user.save();
+  }
+
   async existsByEmail(email: string): Promise<boolean> {
     return UserModel.exists({
       email: email.toLowerCase().trim(),
     }).then(Boolean);
+  }
+  async findByEmailWithPassword(email: string): Promise<IUser | null> {
+    return UserModel.findOne({ email: email.toLowerCase().trim() }).select('+password');
+  }
+  async findByIdWithPassword(userId: string): Promise<IUser | null> {
+    return UserModel.findById(userId).select('+password');
+  }
+  async findOrganizations(status?: VerificationStatus): Promise<IUser[]> {
+    const filter: Record<string, unknown> = { role: UserRole.ORGANIZATION };
+    if (status) filter.verificationStatus = status;
+    return UserModel.find(filter).sort({ createdAt: -1 });
   }
 }

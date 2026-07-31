@@ -1,6 +1,7 @@
 export enum UserRole {
   USER = 'user',
   ADMIN = 'admin',
+  ORGANIZATION = 'organization',
   FSO = 'fso',
 }
 
@@ -17,6 +18,7 @@ export enum OnboardingStatus {
 
 export enum VerificationStatus {
   PENDING = 'pending',
+  UNDER_REVIEW = 'under_review',
   VERIFIED = 'verified',
   REJECTED = 'rejected',
 }
@@ -32,4 +34,13 @@ export enum PaymentStatus {
   PENDING = 'pending',
   COMPLETED = 'completed',
   FAILED = 'failed',
+}
+
+export enum OrganizationType {
+  FARMER = 'farmer',
+  VENDOR = 'vendor',
+  NGO = 'ngo',
+  FOUNDATION = 'foundation',
+  RELIGIOUS_BODY = 'religious_body',
+  AGENCY = 'agency',
 }

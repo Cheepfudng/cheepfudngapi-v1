@@ -4,12 +4,16 @@ export interface IndividualOnboardingInput {
   firstName: string;
   lastName: string;
   phoneNumber: string;
+  password: string;
+  confirmPassword: string;
 }
 
 export interface OrganizationOnboardingInput {
   organizationName: string;
   organizationType: string;
   phoneNumber: string;
+  password: string;
+  confirmPassword: string;
 }
 
 export interface OnboardingUser {

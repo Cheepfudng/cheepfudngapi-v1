@@ -1,6 +1,7 @@
 export enum UserRole {
   USER = 'user',
   ADMIN = 'admin',
+  ORGANIZATION = 'organization',
   FSO = 'fso',
 }
 
@@ -17,6 +18,7 @@ export enum OnboardingStatus {
 
 export enum VerificationStatus {
   PENDING = 'pending',
+  UNDER_REVIEW = 'under_review',
   VERIFIED = 'verified',
   REJECTED = 'rejected',
 }

@@ -101,6 +101,8 @@ describe('OnboardingService', () => {
       firstName: 'John',
       lastName: 'Doe',
       phoneNumber: '+2348012345678',
+      password: 'Secret123!',
+      confirmPassword: 'Secret123!',
     };
 
     it('should reject a user with the wrong account type', async () => {
@@ -148,6 +150,8 @@ describe('OnboardingService', () => {
       organizationName: 'Cheepfud Foundation',
       organizationType: 'non_profit',
       phoneNumber: '+2348012345678',
+      password: 'Secret123!',
+      confirmPassword: 'Secret123!',
     };
 
     it('should reject a user with the wrong account type', async () => {

@@ -7,6 +7,7 @@ import otpRoutes from './routes/otp.routes';
 import onboardingRoutes from './routes/onboarding.routes';
 import { apiReference } from '@scalar/express-api-reference';
 import { openApiDocument } from './docs/openapi';
+import authRoutes from './routes/auth.routes';
 
 import { env } from './config/env';
 import { errorHandler } from './middleware/errorHandler';
@@ -89,6 +90,7 @@ app.get(`/`, (_req: Request, res: Response) => {
 app.use(`/${env.API_VERSION}/otp`, otpRoutes);
 
 app.use(`/${env.API_VERSION}/onboarding`, onboardingRoutes);
+app.use(`/${env.API_VERSION}/auth`, authRoutes);
 
 // 404 handler
 app.use((_req: Request, res: Response) => {

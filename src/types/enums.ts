@@ -35,3 +35,12 @@ export enum PaymentStatus {
   COMPLETED = 'completed',
   FAILED = 'failed',
 }
+
+export enum OrganizationType {
+  FARMER = 'farmer',
+  VENDOR = 'vendor',
+  NGO = 'ngo',
+  FOUNDATION = 'foundation',
+  RELIGIOUS_BODY = 'religious_body',
+  AGENCY = 'agency',
+}

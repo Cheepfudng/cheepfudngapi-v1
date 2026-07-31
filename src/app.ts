@@ -11,6 +11,7 @@ import authRoutes from './routes/auth.routes';
 
 import { env } from './config/env';
 import { errorHandler } from './middleware/errorHandler';
+import organizationRoutes from './routes/organization.routes';
 
 const app: Application = express();
 
@@ -91,6 +92,7 @@ app.use(`/${env.API_VERSION}/otp`, otpRoutes);
 
 app.use(`/${env.API_VERSION}/onboarding`, onboardingRoutes);
 app.use(`/${env.API_VERSION}/auth`, authRoutes);
+app.use(`/${env.API_VERSION}/organizations`, organizationRoutes);
 
 // 404 handler
 app.use((_req: Request, res: Response) => {

@@ -1,4 +1,4 @@
-import { AccountType, UserRole, VerificationStatus } from './enums';
+import { AccountType, OrganizationType, UserRole, VerificationStatus } from './enums';
 
 export interface IndividualOnboardingInput {
   firstName: string;
@@ -10,7 +10,7 @@ export interface IndividualOnboardingInput {
 
 export interface OrganizationOnboardingInput {
   organizationName: string;
-  organizationType: string;
+  organizationType: OrganizationType;
   phoneNumber: string;
   password: string;
   confirmPassword: string;

@@ -2,7 +2,7 @@ import { AppError } from '../errors/app-error';
 import { ErrorCode } from '../errors/error-codes';
 import { UserRepository } from '../repositories/user.repository';
 import { RefreshTokenStore } from '../integrations/contracts/refresh-token-store.interface';
-import { OtpService } from './otp.services';
+import { OtpService } from './otp.service';
 import { AuthService } from './auth.service';
 
 export class PasswordService {

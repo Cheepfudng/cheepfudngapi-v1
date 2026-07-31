@@ -35,6 +35,11 @@ export class OrganizationController {
     const result = await documentService.getVerificationStatus(req.user!.id);
     return sendSuccess(res, 200, 'Verification status retrieved', result);
   };
+  dashboard = async (req: AuthRequest, res: Response): Promise<Response> => {
+    return sendSuccess(res, 200, 'Welcome to your organization dashboard', {
+      message: 'This route is only reachable by verified organizations.',
+    });
+  };
 }
 
 export const organizationController = new OrganizationController();

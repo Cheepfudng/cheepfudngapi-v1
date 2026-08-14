@@ -1,4 +1,4 @@
-import { Document, Schema, model } from 'mongoose';
+import { Document, Schema, Types, model } from 'mongoose';
 import bcrypt from 'bcryptjs';
 
 import {
@@ -8,6 +8,18 @@ import {
   UserRole,
   VerificationStatus,
 } from '../types/enums';
+
+// Plain data shape — Types.DocumentArray<IDeliveryAddress> below wraps this into the
+// actual hydrated subdocument type (with _id, .deleteOne(), etc.) via its own default
+// generic. Extending Types.Subdocument here too would double up _id and collide.
+export interface IDeliveryAddress {
+  label: string;
+  street: string;
+  city: string;
+  state: string;
+  phone: string;
+  isDefault: boolean;
+}
 
 export interface IUser extends Document {
   email: string;
@@ -30,12 +42,23 @@ export interface IUser extends Document {
   isEmailVerified: boolean;
   isActive: boolean;
 
+  deliveryAddresses: Types.DocumentArray<IDeliveryAddress>;
+
   createdAt: Date;
   updatedAt: Date;
 
   comparePassword(candidatePassword: string): Promise<boolean>;
   changedPasswordAfter(jwtTimestamp: number): boolean;
 }
+
+const deliveryAddressSchema = new Schema<IDeliveryAddress>({
+  label: { type: String, required: true, trim: true },
+  street: { type: String, required: true, trim: true },
+  city: { type: String, required: true, trim: true },
+  state: { type: String, required: true, trim: true },
+  phone: { type: String, required: true, trim: true },
+  isDefault: { type: Boolean, default: false },
+});
 
 const userSchema = new Schema<IUser>(
   {
@@ -105,6 +128,10 @@ const userSchema = new Schema<IUser>(
       enum: Object.values(OrganizationType),
       trim: true,
     },
+
+    // Max 5 enforced in UserService, not here — a schema-level array length limit
+    // doesn't give a good validation error message.
+    deliveryAddresses: { type: [deliveryAddressSchema], default: [] },
   },
   {
     timestamps: true,
@@ -127,12 +154,6 @@ userSchema.pre('save', function (next) {
   this.passwordChangedAt = new Date(Date.now() - 1000);
   next();
 });
-
-// Exclude deactivated accounts from every find query by default
-// userSchema.pre(/^find/, function (next) {
-//   this.find({ isActive: { $ne: false } });
-//   next();
-// });
 
 // Never leak password/passwordChangedAt in any JSON response, regardless
 // of how the document was fetched or which controller returns it

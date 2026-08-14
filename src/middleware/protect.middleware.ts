@@ -56,8 +56,49 @@ export const protect = async (
     id: user._id.toString(),
     role: user.role,
     verificationStatus: user.verificationStatus,
+    organizationType: user.organizationType,
   };
   req.token = token;
+
+  next();
+};
+
+// Same identity resolution as protect(), but never rejects the request — a missing,
+// invalid, or expired token just leaves req.user unset (anonymous). For routes that are
+// public but behave differently for an authenticated owner/admin (e.g. a campaign's public
+// detail page showing full status only to its own org or an admin).
+export const optionalAuth = async (
+  req: AuthRequest,
+  _res: Response,
+  next: NextFunction
+): Promise<void> => {
+  const header = req.headers.authorization;
+
+  if (!header || !header.startsWith('Bearer ')) {
+    return next();
+  }
+
+  const token = header.split(' ')[1];
+
+  try {
+    if (await tokenBlacklistStore.isBlacklisted(hashToken(token))) return next();
+
+    const payload = verifyAccessToken(token);
+    const user = await userRepository.findById(payload.sub);
+
+    if (!user || !user.isActive || user.changedPasswordAfter(payload.iat)) return next();
+
+    req.user = {
+      id: user._id.toString(),
+      role: user.role,
+      verificationStatus: user.verificationStatus,
+      organizationType: user.organizationType,
+    };
+    req.token = token;
+  } catch {
+    // Invalid/expired token on an optionally-authenticated route — treat as anonymous
+    // rather than failing the request.
+  }
 
   next();
 };

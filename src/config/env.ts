@@ -84,5 +84,8 @@ export const env = {
   CLOUDINARY_API_KEY: getRequiredEnv('CLOUDINARY_API_KEY'),
   CLOUDINARY_API_SECRET: getRequiredEnv('CLOUDINARY_API_SECRET'),
 
+  PAYSTACK_SECRET_KEY: getRequiredEnv('PAYSTACK_SECRET_KEY'),
+  PAYSTACK_PUBLIC_KEY: getRequiredEnv('PAYSTACK_PUBLIC_KEY'),
+
   SENTRY_DSN: process.env.SENTRY_DSN?.trim() || undefined,
 } as const;

@@ -1,0 +1,538 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cheepfud — Checkout Test Harness</title>
+    <style>
+      :root {
+        --bg: #0a0d12;
+        --panel: #12161f;
+        --panel-2: #171c27;
+        --border: #232a38;
+        --text: #e7ebf3;
+        --muted: #8b93a7;
+        --accent: #3fd6c3;
+        --accent-dim: #234945;
+        --ok: #34d399;
+        --err: #ff6b6b;
+        --warn: #f5b942;
+        --mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+        --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--sans);
+        -webkit-font-smoothing: antialiased;
+      }
+      header {
+        padding: 20px 24px 16px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 12px;
+      }
+      header h1 {
+        font-size: 15px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        margin: 0;
+        color: var(--accent);
+      }
+      header h1 span {
+        color: var(--muted);
+        font-weight: 400;
+      }
+      .config {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .config input {
+        background: var(--panel-2);
+        border: 1px solid var(--border);
+        color: var(--text);
+        padding: 6px 10px;
+        border-radius: 6px;
+        font-family: var(--mono);
+        font-size: 12px;
+        width: 220px;
+      }
+      main {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 16px;
+        padding: 20px 24px;
+        max-width: 1400px;
+        margin: 0 auto;
+      }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .card h2 {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+        margin: 0 0 4px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .step-badge {
+        font-family: var(--mono);
+        font-size: 10px;
+        background: var(--accent-dim);
+        color: var(--accent);
+        padding: 2px 6px;
+        border-radius: 4px;
+      }
+      label {
+        font-size: 11px;
+        color: var(--muted);
+        display: block;
+        margin-bottom: 3px;
+      }
+      input,
+      select {
+        width: 100%;
+        background: var(--panel-2);
+        border: 1px solid var(--border);
+        color: var(--text);
+        padding: 8px 10px;
+        border-radius: 6px;
+        font-family: var(--mono);
+        font-size: 12.5px;
+        margin-bottom: 8px;
+      }
+      input:focus,
+      select:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+      }
+      .row > div {
+        flex: 1;
+      }
+      button {
+        background: var(--accent);
+        color: #06110f;
+        border: none;
+        padding: 9px 14px;
+        border-radius: 6px;
+        font-weight: 600;
+        font-size: 12.5px;
+        cursor: pointer;
+        font-family: var(--sans);
+      }
+      button:hover {
+        filter: brightness(1.08);
+      }
+      button:active {
+        transform: translateY(1px);
+      }
+      button.secondary {
+        background: transparent;
+        color: var(--text);
+        border: 1px solid var(--border);
+      }
+      button.danger {
+        background: var(--err);
+        color: #2a0a0a;
+      }
+      button.warn {
+        background: var(--warn);
+        color: #2a1c00;
+      }
+      button:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+      .btn-row {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .status-chip {
+        font-family: var(--mono);
+        font-size: 11px;
+        padding: 3px 8px;
+        border-radius: 20px;
+        background: var(--panel-2);
+        color: var(--muted);
+        border: 1px solid var(--border);
+      }
+      .status-chip.on {
+        color: var(--ok);
+        border-color: var(--ok);
+      }
+      .hint {
+        font-size: 11px;
+        color: var(--muted);
+        line-height: 1.5;
+        margin-top: -2px;
+      }
+      .pay-link {
+        display: none;
+        margin-top: 4px;
+        padding: 10px 12px;
+        background: var(--accent-dim);
+        border: 1px dashed var(--accent);
+        border-radius: 6px;
+        text-align: center;
+      }
+      .pay-link a {
+        color: var(--accent);
+        font-weight: 600;
+        text-decoration: none;
+        font-size: 13px;
+      }
+      #console-wrap {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 0 24px 24px;
+      }
+      #console-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+      }
+      #console-header h2 {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+        margin: 0;
+      }
+      #console {
+        background: #05070a;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 12px;
+        height: 320px;
+        overflow-y: auto;
+        font-family: var(--mono);
+        font-size: 11.5px;
+        line-height: 1.6;
+      }
+      .log-entry {
+        margin-bottom: 10px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid #14181f;
+      }
+      .log-entry:last-child {
+        border: none;
+      }
+      .log-line1 {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .log-time {
+        color: #4a5568;
+      }
+      .log-method {
+        color: var(--accent);
+        font-weight: 700;
+      }
+      .log-path {
+        color: var(--muted);
+      }
+      .log-status {
+        font-weight: 700;
+        margin-left: auto;
+      }
+      .log-status.s2 {
+        color: var(--ok);
+      }
+      .log-status.s4,
+      .log-status.s5 {
+        color: var(--err);
+      }
+      .log-body {
+        white-space: pre-wrap;
+        color: #9aa4b8;
+        margin-top: 4px;
+        word-break: break-all;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>
+        Cheepfud
+        <span
+          >/ checkout &amp; orders test harness — hits your real API, opens the real Paystack
+          page</span
+        >
+      </h1>
+      <div class="config">
+        Base URL
+        <input id="baseUrl" value="http://localhost:5000" />
+      </div>
+    </header>
+
+    <main>
+      <!-- AUTH -->
+      <div class="card">
+        <h2>1 · Login <span class="step-badge" id="authStatus">not logged in</span></h2>
+        <label>Email</label>
+        <input id="email" placeholder="buyer@test.com" />
+        <label>Password</label>
+        <input id="password" type="password" placeholder="••••••••" />
+        <div class="btn-row">
+          <button onclick="login()">Login</button>
+          <button class="secondary" onclick="whoAmI()">Get /auth/me</button>
+        </div>
+        <div class="hint">
+          Use a real test individual buyer account you've already onboarded. Token is kept in memory
+          only — refresh clears it, log in again.
+        </div>
+      </div>
+
+      <!-- CART -->
+      <div class="card">
+        <h2>2 · Cart</h2>
+        <div class="row">
+          <div>
+            <label>Product ID</label>
+            <input id="productId" placeholder="paste a real _id from GET /products" />
+          </div>
+          <div style="max-width: 90px">
+            <label>Qty</label>
+            <input id="quantity" value="1" />
+          </div>
+        </div>
+        <div class="btn-row">
+          <button onclick="addToCart()">Add to cart</button>
+          <button class="secondary" onclick="viewCart()">View cart</button>
+          <button class="secondary" onclick="clearCart()">Clear cart</button>
+        </div>
+        <div class="hint">
+          Add items from 2 different sellers here if you want to test the multi-seller-per-checkout
+          split.
+        </div>
+      </div>
+
+      <!-- CHECKOUT -->
+      <div class="card">
+        <h2>3 · Checkout</h2>
+        <label>Address ID</label>
+        <input id="addressId" placeholder="paste a real addressId from GET /users/addresses" />
+        <label>Delivery method</label>
+        <select id="deliveryMethod">
+          <option value="delivery">delivery</option>
+          <option value="pickup">pickup</option>
+        </select>
+        <div class="btn-row">
+          <button onclick="checkout()">Checkout</button>
+        </div>
+        <div class="pay-link" id="payLink">
+          <a id="payLinkAnchor" target="_blank" rel="noopener">Open real Paystack checkout →</a>
+        </div>
+        <div class="hint">
+          Opens the actual Paystack test-mode page in a new tab — complete payment there with a
+          Paystack test card to trigger a real webhook.
+        </div>
+      </div>
+
+      <!-- STRESS TEST -->
+      <div class="card">
+        <h2>4 · Double-checkout guard <span class="step-badge">Phase 11.5</span></h2>
+        <div class="hint">
+          Fires two checkout calls at once with the same address/method, same cart. Expect exactly
+          ONE 200/201 and ONE 409 CONFLICT if the lock is working.
+        </div>
+        <div class="btn-row">
+          <button class="warn" onclick="doubleCheckout()">Fire double checkout</button>
+        </div>
+      </div>
+
+      <!-- ORDERS -->
+      <div class="card">
+        <h2>5 · Orders</h2>
+        <div class="btn-row">
+          <button class="secondary" onclick="myOrders()">Get my orders</button>
+        </div>
+        <label>Order Number</label>
+        <input id="orderNumber" placeholder="ORD-20260731-ABC123" />
+        <div class="btn-row">
+          <button class="secondary" onclick="getOrder()">Get order detail</button>
+          <button class="danger" onclick="cancelOrder()">Cancel order</button>
+          <button onclick="confirmDelivery()">Confirm delivery</button>
+        </div>
+        <label style="margin-top: 6px">Checkout reference (get sibling orders)</label>
+        <input id="checkoutReference" placeholder="CHF-..." />
+        <div class="btn-row">
+          <button class="secondary" onclick="getCheckoutGroup()">Get checkout group</button>
+        </div>
+      </div>
+    </main>
+
+    <div id="console-wrap">
+      <div id="console-header">
+        <h2>Request / response log</h2>
+        <button class="secondary" onclick="document.getElementById('console').innerHTML = ''">
+          Clear log
+        </button>
+      </div>
+      <div id="console"></div>
+    </div>
+
+    <script>
+      const state = { accessToken: null, refreshToken: null, email: null };
+
+      function baseUrl() {
+        return document.getElementById('baseUrl').value.replace(/\/$/, '');
+      }
+
+      function log(method, path, status, body) {
+        const el = document.getElementById('console');
+        const entry = document.createElement('div');
+        entry.className = 'log-entry';
+        const statusClass = status ? 's' + String(status)[0] : '';
+        entry.innerHTML = `
+      <div class="log-line1">
+        <span class="log-time">${new Date().toLocaleTimeString()}</span>
+        <span class="log-method">${method}</span>
+        <span class="log-path">${path}</span>
+        <span class="log-status ${statusClass}">${status ?? 'ERR'}</span>
+      </div>
+      <div class="log-body">${escapeHtml(JSON.stringify(body, null, 2))}</div>
+    `;
+        el.prepend(entry);
+      }
+
+      function escapeHtml(str) {
+        return str.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
+      }
+
+      async function api(method, path, body) {
+        const headers = { 'Content-Type': 'application/json' };
+        if (state.accessToken) headers['Authorization'] = `Bearer ${state.accessToken}`;
+        let res, data;
+        try {
+          res = await fetch(baseUrl() + path, {
+            method,
+            headers,
+            body: body ? JSON.stringify(body) : undefined,
+          });
+          data = await res.json().catch(() => ({}));
+        } catch (e) {
+          log(method, path, null, {
+            networkError: e.message,
+            hint: 'Check baseUrl, CORS (ALLOWED_ORIGINS), and that the server is running',
+          });
+          throw e;
+        }
+        log(method, path, res.status, data);
+        return { status: res.status, data };
+      }
+
+      function setAuthStatus(on) {
+        const chip = document.getElementById('authStatus');
+        chip.textContent = on ? `logged in — ${state.email}` : 'not logged in';
+        chip.classList.toggle('on', on);
+      }
+
+      async function login() {
+        const email = document.getElementById('email').value;
+        const password = document.getElementById('password').value;
+        const { status, data } = await api('POST', '/v1/auth/login', { email, password });
+        if (status === 200 && data?.data?.accessToken) {
+          state.accessToken = data.data.accessToken;
+          state.refreshToken = data.data.refreshToken;
+          state.email = email;
+          setAuthStatus(true);
+        }
+      }
+
+      async function whoAmI() {
+        await api('GET', '/v1/auth/me');
+      }
+
+      async function addToCart() {
+        const productId = document.getElementById('productId').value;
+        const quantity = Number(document.getElementById('quantity').value || 1);
+        await api('POST', '/v1/cart/add', { productId, quantity });
+      }
+      async function viewCart() {
+        await api('GET', '/v1/cart');
+      }
+      async function clearCart() {
+        await api('DELETE', '/v1/cart');
+      }
+
+      async function checkout() {
+        const addressId = document.getElementById('addressId').value;
+        const deliveryMethod = document.getElementById('deliveryMethod').value;
+        const { status, data } = await api('POST', '/v1/orders/checkout', {
+          addressId,
+          deliveryMethod,
+        });
+        const payLink = document.getElementById('payLink');
+        const anchor = document.getElementById('payLinkAnchor');
+        if (status < 300 && data?.data?.paymentUrl) {
+          anchor.href = data.data.paymentUrl;
+          payLink.style.display = 'block';
+        } else {
+          payLink.style.display = 'none';
+        }
+        if (data?.data?.checkoutReference) {
+          document.getElementById('checkoutReference').value = data.data.checkoutReference;
+        }
+      }
+
+      async function doubleCheckout() {
+        const addressId = document.getElementById('addressId').value;
+        const deliveryMethod = document.getElementById('deliveryMethod').value;
+        const call = () => api('POST', '/v1/orders/checkout', { addressId, deliveryMethod });
+        const [a, b] = await Promise.allSettled([call(), call()]);
+        const statuses = [a, b].map((r) => (r.status === 'fulfilled' ? r.value.status : 'threw'));
+        log('STRESS', '/v1/orders/checkout ×2', null, {
+          results: statuses,
+          expected: 'one 2xx, one 409',
+        });
+      }
+
+      async function myOrders() {
+        await api('GET', '/v1/orders');
+      }
+      async function getOrder() {
+        const n = document.getElementById('orderNumber').value;
+        await api('GET', `/v1/orders/${n}`);
+      }
+      async function cancelOrder() {
+        const n = document.getElementById('orderNumber').value;
+        await api('POST', `/v1/orders/${n}/cancel`);
+      }
+      async function confirmDelivery() {
+        const n = document.getElementById('orderNumber').value;
+        await api('POST', `/v1/orders/${n}/confirm-delivery`);
+      }
+      async function getCheckoutGroup() {
+        const ref = document.getElementById('checkoutReference').value;
+        await api('GET', `/v1/orders/checkout/${ref}`);
+      }
+    </script>
+  </body>
+</html>

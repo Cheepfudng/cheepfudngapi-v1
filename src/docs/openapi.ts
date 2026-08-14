@@ -1,11 +1,16 @@
 import { ErrorCode } from '../errors';
 import {
   AccountType,
+  CampaignStatus,
+  DeliveryMethod,
   OnboardingStatus,
+  OrderStatus,
   OrganizationType,
+  UrgencyLevel,
   UserRole,
   VerificationStatus,
 } from '../types';
+import { NIGERIAN_STATES } from '../utils/constants';
 
 export const openApiDocument = {
   openapi: '3.0.3',
@@ -48,6 +53,31 @@ export const openApiDocument = {
     {
       name: 'Admin',
       description: 'Admin-only organization review endpoints',
+    },
+    {
+      name: 'Products',
+      description: 'Marketplace product listings from supply-side organizations',
+    },
+    {
+      name: 'Cart',
+      description: "Authenticated buyer's product cart (never shared with campaign donations)",
+    },
+    {
+      name: 'Users',
+      description: 'Authenticated user profile endpoints (currently: delivery addresses)',
+    },
+    {
+      name: 'Orders',
+      description: 'Checkout, payment (Paystack), and order fulfillment',
+    },
+    {
+      name: 'Webhooks',
+      description: 'Payment provider webhooks — not called by frontend clients',
+    },
+    {
+      name: 'Campaigns',
+      description:
+        'Campaign browsing, donations, and campaign-org management. Donation funds are restricted-use — see the fund-summary endpoint.',
     },
   ],
 
@@ -1579,6 +1609,1638 @@ export const openApiDocument = {
         },
       },
     },
+    '/v1/admin/campaigns': {
+      get: {
+        tags: ['Admin'],
+        summary: 'List campaigns (admin only)',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'status',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', enum: Object.values(CampaignStatus), default: 'pending_approval' },
+            description: 'Filter by status. Defaults to pending_approval.',
+          },
+        ],
+        responses: {
+          200: {
+            description: 'Campaigns retrieved',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/CampaignListRaw' } },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          403: {
+            description: 'Not an admin',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/admin/campaigns/{id}/approve': {
+      put: {
+        tags: ['Admin'],
+        summary: 'Approve or reject a campaign (admin only)',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/ReviewCampaignRequest' },
+              examples: {
+                Approve: { value: { decision: 'approved' } },
+                Reject: {
+                  value: { decision: 'rejected', rejectionReason: 'Missing distribution plan detail' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'Campaign reviewed',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/CampaignSuccessResponse' } },
+            },
+          },
+          400: {
+            description: 'rejectionReason required when rejecting',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+                examples: {
+                  MissingReason: {
+                    value: {
+                      status: false,
+                      message: 'rejectionReason is required when rejecting',
+                      error: { code: ErrorCode.VALIDATION_ERROR },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          403: {
+            description: 'Not an admin',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          404: {
+            description: 'Campaign not found',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          409: {
+            description: 'Campaign has already been reviewed',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/products': {
+      get: {
+        tags: ['Products'],
+        summary: 'List products (public)',
+        description:
+          'Public marketplace listing. Always filters isActive: true and isApproved: true.',
+        parameters: [
+          { name: 'category', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'state', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'lga', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'minPrice', in: 'query', required: false, schema: { type: 'number' } },
+          { name: 'maxPrice', in: 'query', required: false, schema: { type: 'number' } },
+          {
+            name: 'search',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+            description: 'Regex-matched against name and description',
+          },
+          {
+            name: 'sort',
+            in: 'query',
+            required: false,
+            schema: {
+              type: 'string',
+              enum: ['price_asc', 'price_desc', 'newest'],
+              default: 'newest',
+            },
+          },
+          { name: 'page', in: 'query', required: false, schema: { type: 'integer', default: 1 } },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', default: 20, maximum: 50 },
+          },
+        ],
+        responses: {
+          200: {
+            description: 'Products retrieved',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ProductListResponse' } },
+            },
+          },
+          400: {
+            description: 'Invalid query parameters',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+      post: {
+        tags: ['Products'],
+        summary: 'Create a product (verified farmer/vendor organizations only)',
+        description:
+          'Middleware chain: protect -> requireVerifiedOrganization -> requireSupplyOrganization. seller is always taken from the authenticated user, never from the request body.',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'multipart/form-data': {
+              schema: { $ref: '#/components/schemas/CreateProductRequest' },
+            },
+          },
+        },
+        responses: {
+          201: {
+            description: 'Product created successfully',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ProductSuccessResponse' },
+              },
+            },
+          },
+          400: {
+            description: 'Validation error',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+                examples: {
+                  MinimumOrderExceedsQuantity: {
+                    value: {
+                      status: false,
+                      message: 'minimumOrder cannot exceed quantityAvailable',
+                      error: { code: ErrorCode.VALIDATION_ERROR },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          403: {
+            description: 'Organization not verified, or not a supply-side organization',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+                examples: {
+                  NotVerified: {
+                    value: {
+                      status: false,
+                      message:
+                        'Your organization is pending verification. Please complete document submission and wait for admin approval.',
+                      error: { code: ErrorCode.ORGANIZATION_NOT_VERIFIED },
+                    },
+                  },
+                  NotSupplyOrganization: {
+                    value: {
+                      status: false,
+                      message: 'Only farmer or vendor organizations can perform this action',
+                      error: { code: ErrorCode.SUPPLY_ORGANIZATION_REQUIRED },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/v1/products/{id}': {
+      get: {
+        tags: ['Products'],
+        summary: 'Get product detail (public)',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          200: {
+            description: 'Product retrieved',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ProductSuccessResponse' },
+              },
+            },
+          },
+          404: {
+            description: 'Product not found or inactive',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+                examples: {
+                  ProductNotFound: {
+                    value: {
+                      status: false,
+                      message: 'Product not found',
+                      error: { code: ErrorCode.PRODUCT_NOT_FOUND },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      put: {
+        tags: ['Products'],
+        summary: 'Update a product (owner only)',
+        description:
+          'seller cannot be changed. Image replacement is not supported by this endpoint yet.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/UpdateProductRequest' } },
+          },
+        },
+        responses: {
+          200: {
+            description: 'Product updated successfully',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ProductSuccessResponse' },
+              },
+            },
+          },
+          400: {
+            description: 'Validation error',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          403: {
+            description: 'Not the product owner',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+                examples: {
+                  NotOwner: {
+                    value: {
+                      status: false,
+                      message: 'You do not have permission to modify this product',
+                      error: { code: ErrorCode.FORBIDDEN },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          404: {
+            description: 'Product not found',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+      delete: {
+        tags: ['Products'],
+        summary: 'Soft-delete a product (owner only)',
+        description:
+          'Sets isActive to false. The document is not actually removed from the database.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          200: {
+            description: 'Product deleted successfully',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/SuccessResponse' } },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          403: {
+            description: 'Not the product owner',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          404: {
+            description: 'Product not found',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/cart/add': {
+      post: {
+        tags: ['Cart'],
+        summary: 'Add a product to the cart (or increment if already present)',
+        description:
+          'If the product is already in the cart, quantity is incremented by the requested amount, capped at quantityAvailable — a request that would exceed stock is rejected outright, never silently truncated. minimumOrder is only enforced on the first add of a given product.',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/AddToCartRequest' },
+              examples: {
+                AddExample: { value: { productId: '60d0fe4f54e0d9001c23a4a1', quantity: 2 } },
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'Item added, current cart returned',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/CartSuccessResponse' } },
+            },
+          },
+          400: {
+            description: 'Validation error',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+                examples: {
+                  BelowMinimumOrder: {
+                    value: {
+                      status: false,
+                      message: 'Minimum order for this product is 5',
+                      error: { code: ErrorCode.VALIDATION_ERROR },
+                    },
+                  },
+                  ExceedsStock: {
+                    value: {
+                      status: false,
+                      message: 'Only 10 crate(s) available',
+                      error: { code: ErrorCode.VALIDATION_ERROR },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          404: {
+            description: 'Product not found or inactive',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+                examples: {
+                  ProductNotFound: {
+                    value: {
+                      status: false,
+                      message: 'Product not found',
+                      error: { code: ErrorCode.PRODUCT_NOT_FOUND },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/v1/cart': {
+      get: {
+        tags: ['Cart'],
+        summary: "Get the caller's own cart",
+        description:
+          "Always the authenticated user's own cart — there is no way to pass another user's id. Returns an empty cart shape (not a 404) if the user has no cart yet. Items whose product is no longer active/approved are still listed, flagged unavailable: true, and excluded from subtotal/totalItems.",
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: {
+            description: 'Cart retrieved',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/CartSuccessResponse' } },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+      delete: {
+        tags: ['Cart'],
+        summary: 'Clear the entire cart',
+        description:
+          'Empties items in one call. Returns the same empty-cart shape as GET /cart with no items, rather than a distinct empty-state shape.',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: {
+            description: 'Cart cleared',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/CartSuccessResponse' } },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/cart/update': {
+      put: {
+        tags: ['Cart'],
+        summary: 'Set an item to an exact quantity',
+        description:
+          'quantity: 0 removes the item, same as DELETE /v1/cart/{productId}. Otherwise enforces the same quantityAvailable stock-cap as /cart/add (minimumOrder is not re-enforced here, so an existing line can always be reduced). 404 if the product is not currently in the cart.',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/UpdateCartRequest' },
+              examples: {
+                SetQuantity: { value: { productId: '60d0fe4f54e0d9001c23a4a1', quantity: 3 } },
+                RemoveViaZero: { value: { productId: '60d0fe4f54e0d9001c23a4a1', quantity: 0 } },
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'Cart updated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/CartSuccessResponse' } },
+            },
+          },
+          400: {
+            description: 'Validation error (e.g. exceeds quantityAvailable)',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          404: {
+            description: 'Product not in cart, or product not found/inactive',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+                examples: {
+                  NotInCart: {
+                    value: {
+                      status: false,
+                      message: 'Product not in cart',
+                      error: { code: ErrorCode.NOT_FOUND },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/v1/cart/increment': {
+      patch: {
+        tags: ['Cart'],
+        summary: 'Increment or decrement an existing item by exactly 1 (stepper UI)',
+        description:
+          "For the +/- stepper on an item already in the cart. POST /v1/cart/add remains the entry point for adding a new quantity from a product page — this endpoint only accepts delta: 1 or -1, not a general 'add N'. Applied as an atomic MongoDB increment so two rapid-fire calls can never lose an update the way a naive read-then-write would. delta: -1 on a quantity-1 item removes it, same as setting quantity: 0 via PUT /cart/update. Returns the full cart shape (same as GET /v1/cart) so the UI can update its stepper directly from the response.",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/AdjustCartQuantityRequest' },
+              examples: {
+                Increment: { value: { productId: '60d0fe4f54e0d9001c23a4a1', delta: 1 } },
+                Decrement: { value: { productId: '60d0fe4f54e0d9001c23a4a1', delta: -1 } },
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'Cart updated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/CartSuccessResponse' } },
+            },
+          },
+          400: {
+            description:
+              'Validation error (delta not exactly 1 or -1, or exceeds quantityAvailable)',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+                examples: {
+                  InvalidDelta: {
+                    value: {
+                      status: false,
+                      message: 'delta must be exactly 1 or -1',
+                      error: { code: ErrorCode.VALIDATION_ERROR },
+                    },
+                  },
+                  ExceedsStock: {
+                    value: {
+                      status: false,
+                      message: 'Only 10 crate(s) available',
+                      error: { code: ErrorCode.VALIDATION_ERROR },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          404: {
+            description: 'Product not in cart',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/cart/{productId}': {
+      delete: {
+        tags: ['Cart'],
+        summary: 'Remove one item from the cart',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'productId', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          200: {
+            description: 'Item removed, current cart returned',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/CartSuccessResponse' } },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          404: {
+            description: 'Product not in cart',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/users/addresses': {
+      get: {
+        tags: ['Users'],
+        summary: "Get the caller's own delivery addresses",
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: {
+            description: 'Delivery addresses retrieved',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/AddressListResponse' } },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+      post: {
+        tags: ['Users'],
+        summary: 'Add a delivery address',
+        description:
+          'Max 5 addresses per user. The first address added is always auto-set as default, regardless of anything sent in the body — isDefault is not an accepted field here at all.',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/CreateAddressRequest' } },
+          },
+        },
+        responses: {
+          201: {
+            description: 'Delivery address added, full address list returned',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/AddressListResponse' } },
+            },
+          },
+          400: {
+            description:
+              'Validation error (invalid state, malformed phone, or already at 5 addresses)',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+                examples: {
+                  MaxAddresses: {
+                    value: {
+                      status: false,
+                      message: 'You can only save up to 5 delivery addresses',
+                      error: { code: ErrorCode.VALIDATION_ERROR },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/users/addresses/{addressId}': {
+      put: {
+        tags: ['Users'],
+        summary: 'Update a delivery address',
+        description:
+          "Must belong to the caller — 404 (not 403) if addressId isn't found within their own address list, so existence for another user is never confirmed. isDefault cannot be changed here; use PATCH /v1/users/addresses/{addressId}/default instead. Fields left out of the body are untouched.",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'addressId', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/UpdateAddressRequest' } },
+          },
+        },
+        responses: {
+          200: {
+            description: 'Delivery address updated, full address list returned',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/AddressListResponse' } },
+            },
+          },
+          400: {
+            description: 'Validation error',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          404: {
+            description: 'Address not found (or belongs to a different user)',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+      delete: {
+        tags: ['Users'],
+        summary: 'Remove a delivery address',
+        description:
+          'Same caller-ownership rule as PUT. If the removed address was the default and others remain, the most recently added remaining address is automatically promoted to default. Removing the last address is fine — a user can have zero addresses.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'addressId', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          200: {
+            description: 'Delivery address removed, full address list returned',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/AddressListResponse' } },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          404: {
+            description: 'Address not found (or belongs to a different user)',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/users/addresses/{addressId}/default': {
+      patch: {
+        tags: ['Users'],
+        summary: 'Explicitly set an address as the default',
+        description:
+          'Un-defaults every other address for this user — only one isDefault: true at a time, enforced server-side regardless of prior state.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'addressId', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          200: {
+            description: 'Default address updated, full address list returned',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/AddressListResponse' } },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          404: {
+            description: 'Address not found (or belongs to a different user)',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/orders/checkout': {
+      post: {
+        tags: ['Orders'],
+        summary: 'Checkout the cart and start payment',
+        description:
+          'Splits the cart into one Order per seller (linked by a shared checkoutReference), atomically reserves stock for every line, then initializes a single Paystack transaction for the combined total. The cart is NOT cleared here — only once the webhook confirms payment.',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/CheckoutRequest' } },
+          },
+        },
+        responses: {
+          201: {
+            description:
+              'Checkout started — orders created at paymentStatus: pending, redirect the buyer to paymentUrl',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/CheckoutSuccessResponse' },
+              },
+            },
+          },
+          400: {
+            description: 'Empty cart, unavailable item, or insufficient stock',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+                examples: {
+                  StockShortage: {
+                    value: {
+                      status: false,
+                      message: 'Fresh Tomatoes is no longer available in the requested quantity',
+                      error: { code: ErrorCode.VALIDATION_ERROR },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          404: {
+            description: 'addressId not found among the caller’s own saved addresses',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          409: {
+            description:
+              'A checkout is already in progress for this buyer (rapid double-submit) — not queued, rejected immediately',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+                examples: {
+                  CheckoutInProgress: {
+                    value: {
+                      status: false,
+                      message: 'A checkout is already in progress',
+                      error: { code: ErrorCode.CONFLICT },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          429: {
+            description: 'Too many checkout attempts',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          502: {
+            description:
+              'Payment could not be initialized (e.g. Paystack unreachable) — all reserved stock and any created orders are rolled back',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+                examples: {
+                  CheckoutFailed: {
+                    value: {
+                      status: false,
+                      message: 'Checkout could not be started, please try again',
+                      error: { code: ErrorCode.CHECKOUT_FAILED },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/v1/orders': {
+      get: {
+        tags: ['Orders'],
+        summary: "List the caller's own orders",
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'orderStatus',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', enum: Object.values(OrderStatus) },
+          },
+          { name: 'page', in: 'query', required: false, schema: { type: 'integer', default: 1 } },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', default: 20, maximum: 50 },
+          },
+        ],
+        responses: {
+          200: {
+            description: 'Orders retrieved',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/OrderListResponse' } },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/orders/checkout/{checkoutReference}': {
+      get: {
+        tags: ['Orders'],
+        summary: 'Get all sibling orders from one checkout event',
+        description:
+          'For the order-confirmation screen, which may need to show a multi-seller checkout as a single event. Buyer (owner) or admin only.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'checkoutReference', in: 'path', required: true, schema: { type: 'string' } },
+        ],
+        responses: {
+          200: {
+            description: 'Sibling orders retrieved',
+            content: {
+              'application/json': {
+                schema: {
+                  allOf: [
+                    { $ref: '#/components/schemas/SuccessResponse' },
+                    {
+                      type: 'object',
+                      properties: {
+                        data: { type: 'array', items: { $ref: '#/components/schemas/Order' } },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          403: {
+            description: 'checkoutReference belongs to a different buyer',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          404: {
+            description: 'No orders found for this checkoutReference',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/orders/seller/incoming': {
+      get: {
+        tags: ['Orders'],
+        summary: 'List paid orders awaiting fulfillment for the logged-in seller',
+        description:
+          'Only orders where paymentStatus: completed — unpaid orders never show as "incoming".',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'orderStatus',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', enum: Object.values(OrderStatus) },
+          },
+          { name: 'page', in: 'query', required: false, schema: { type: 'integer', default: 1 } },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', default: 20, maximum: 50 },
+          },
+        ],
+        responses: {
+          200: {
+            description: 'Incoming orders retrieved',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/OrderListResponse' } },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          403: {
+            description: 'Not verified, or not a supply-side organization',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+                examples: {
+                  NotSupplyOrganization: {
+                    value: {
+                      status: false,
+                      message: 'Only farmer or vendor organizations can perform this action',
+                      error: { code: ErrorCode.SUPPLY_ORGANIZATION_REQUIRED },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/v1/orders/{orderNumber}': {
+      get: {
+        tags: ['Orders'],
+        summary: 'Get order detail',
+        description:
+          'Accessible by the buyer, any seller with an item in it, or admin. 403 otherwise.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'orderNumber', in: 'path', required: true, schema: { type: 'string' } },
+        ],
+        responses: {
+          200: {
+            description: 'Order retrieved',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/OrderSuccessResponse' } },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          403: {
+            description: 'Not the buyer, an involved seller, or an admin',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          404: {
+            description: 'Order not found',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/orders/{orderNumber}/cancel': {
+      post: {
+        tags: ['Orders'],
+        summary: 'Cancel an order (buyer only, pre-payment)',
+        description:
+          'Only allowed while paymentStatus !== completed. Restores stock for the order’s items. A post-payment cancel attempt is rejected — that’s a refund scenario (out of scope), not a self-cancel.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'orderNumber', in: 'path', required: true, schema: { type: 'string' } },
+        ],
+        responses: {
+          200: {
+            description: 'Order cancelled, stock restored',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/OrderSuccessResponse' } },
+            },
+          },
+          400: {
+            description: 'Order has already been paid for',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+                examples: {
+                  AlreadyPaid: {
+                    value: {
+                      status: false,
+                      message:
+                        'This order has already been paid for and can no longer be self-cancelled. Please contact support.',
+                      error: { code: ErrorCode.ORDER_ALREADY_PAID },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          404: {
+            description: 'Order not found (or not owned by the caller)',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/orders/{orderNumber}/confirm-delivery': {
+      post: {
+        tags: ['Orders'],
+        summary: 'Buyer confirms delivery (from in_transit only)',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'orderNumber', in: 'path', required: true, schema: { type: 'string' } },
+        ],
+        responses: {
+          200: {
+            description: 'Delivery confirmed, deliveredAt set',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/OrderSuccessResponse' } },
+            },
+          },
+          400: {
+            description: 'Order is not currently in_transit',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+                examples: {
+                  InvalidTransition: {
+                    value: {
+                      status: false,
+                      message: 'Order must be in_transit to confirm delivery (currently preparing)',
+                      error: { code: ErrorCode.INVALID_STATUS_TRANSITION },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          404: {
+            description: 'Order not found (or not owned by the caller)',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/orders/{orderNumber}/status': {
+      put: {
+        tags: ['Orders'],
+        summary: 'Seller advances order status (forward-only, one step at a time)',
+        description:
+          'pending -> confirmed -> preparing -> in_transit -> delivered. Any backward or skipped transition is rejected. Requires the caller to own at least one item in the order.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'orderNumber', in: 'path', required: true, schema: { type: 'string' } },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/UpdateOrderStatusRequest' },
+              examples: { Advance: { value: { status: 'confirmed' } } },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'Order status updated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/OrderSuccessResponse' } },
+            },
+          },
+          400: {
+            description: 'Backward or skipped transition',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+                examples: {
+                  InvalidTransition: {
+                    value: {
+                      status: false,
+                      message: 'Cannot transition order from pending to in_transit',
+                      error: { code: ErrorCode.INVALID_STATUS_TRANSITION },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          403: {
+            description:
+              'Not verified, not a supply-side organization, or doesn’t own an item in this order',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          404: {
+            description: 'Order not found',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/campaigns': {
+      get: {
+        tags: ['Campaigns'],
+        summary: 'Browse active campaigns (public)',
+        description:
+          'Always filters status: active, sorted by urgencyLevel (critical first) then recency.',
+        parameters: [
+          {
+            name: 'urgencyLevel',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', enum: Object.values(UrgencyLevel) },
+          },
+          { name: 'state', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'page', in: 'query', required: false, schema: { type: 'integer', default: 1 } },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', default: 20, maximum: 50 },
+          },
+        ],
+        responses: {
+          200: {
+            description: 'Campaigns retrieved',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/CampaignListResponse' } },
+            },
+          },
+        },
+      },
+      post: {
+        tags: ['Campaigns'],
+        summary: 'Create a campaign (verified campaign organizations only)',
+        description:
+          'Middleware chain: protect -> requireVerifiedOrganization -> requireCampaignOrganization. organization is always taken from the authenticated user. Created at status: pending_approval; a restricted CampaignFund is created alongside it automatically.',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'multipart/form-data': {
+              schema: { $ref: '#/components/schemas/CreateCampaignRequest' },
+            },
+          },
+        },
+        responses: {
+          201: {
+            description: 'Campaign created — pending admin approval',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/CampaignSuccessResponse' } },
+            },
+          },
+          400: {
+            description: 'Validation error (title/description length, invalid dates, etc.)',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          403: {
+            description: 'Organization not verified, or not a campaign-side organization',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+                examples: {
+                  NotCampaignOrganization: {
+                    value: {
+                      status: false,
+                      message:
+                        'Only NGO, foundation, religious body, or agency organizations can perform this action',
+                      error: { code: ErrorCode.CAMPAIGN_ORGANIZATION_REQUIRED },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/v1/campaigns/{id}': {
+      get: {
+        tags: ['Campaigns'],
+        summary: 'Get campaign detail',
+        description:
+          'Public for status: active campaigns. If an authenticated request comes from the owning organization or an admin (bearer token optional on this route), any status is visible — otherwise a non-active campaign 404s the same as if it didn’t exist.',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          200: {
+            description: 'Campaign retrieved',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/CampaignSuccessResponse' } },
+            },
+          },
+          404: {
+            description: 'Campaign not found, or not visible to this caller',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+      put: {
+        tags: ['Campaigns'],
+        summary: 'Update a campaign (owner only)',
+        description:
+          'Only description, distributionPlan, urgencyLevel, and fundingGoal are editable. fundingGoal cannot be changed once currentFunding > 0.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/UpdateCampaignRequest' } },
+          },
+        },
+        responses: {
+          200: {
+            description: 'Campaign updated successfully',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/CampaignSuccessResponse' } },
+            },
+          },
+          400: {
+            description: 'Validation error, or fundingGoal change after donations have come in',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+                examples: {
+                  FundingGoalLocked: {
+                    value: {
+                      status: false,
+                      message: 'fundingGoal cannot be changed once a campaign has received donations',
+                      error: { code: ErrorCode.VALIDATION_ERROR },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          403: {
+            description: 'Not the campaign owner',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          404: {
+            description: 'Campaign not found',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/campaigns/{id}/donate': {
+      post: {
+        tags: ['Campaigns'],
+        summary: 'Donate to a campaign',
+        description:
+          'Any authenticated account can donate — not role-restricted. Validates the campaign is active and the amount meets DONATION_MINIMUM_KOBO before ever calling Paystack. Funds are recorded against the CampaignFund only once the webhook confirms payment.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/DonateRequest' } },
+          },
+        },
+        responses: {
+          201: {
+            description: 'Donation payment started — redirect the donor to paymentUrl',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/DonateSuccessResponse' } },
+            },
+          },
+          400: {
+            description: 'Campaign not active, or amount below the minimum',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+                examples: {
+                  BelowMinimum: {
+                    value: {
+                      status: false,
+                      message: 'Minimum donation is ₦500',
+                      error: { code: ErrorCode.VALIDATION_ERROR },
+                    },
+                  },
+                  NotActive: {
+                    value: {
+                      status: false,
+                      message: 'This campaign is not currently accepting donations',
+                      error: { code: ErrorCode.CAMPAIGN_NOT_ACTIVE },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          404: {
+            description: 'Campaign not found',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/campaigns/{id}/updates': {
+      post: {
+        tags: ['Campaigns'],
+        summary: 'Post a campaign update (owner only)',
+        description:
+          'Appends to campaignUpdates. Deliberately does NOT email past donors — the Notification domain doesn’t exist yet.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/PostCampaignUpdateRequest' } },
+          },
+        },
+        responses: {
+          201: {
+            description: 'Campaign update posted',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/CampaignSuccessResponse' } },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          403: {
+            description: 'Not the campaign owner',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/campaigns/{id}/distribution-records': {
+      post: {
+        tags: ['Campaigns'],
+        summary: 'Add a distribution record (owner only)',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: true,
+          content: {
+            'multipart/form-data': {
+              schema: { $ref: '#/components/schemas/AddDistributionRecordRequest' },
+            },
+          },
+        },
+        responses: {
+          201: {
+            description: 'Distribution record added',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/CampaignSuccessResponse' } },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          403: {
+            description: 'Not the campaign owner',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/campaigns/{id}/fund-summary': {
+      get: {
+        tags: ['Campaigns'],
+        summary: 'Get the campaign fund summary (owner only) — restricted-funds enforcement point',
+        description:
+          'Returns EXACTLY 6 fields: totalDonated, totalAllocatedToFood, totalDelivered, availableForProcurement, donorCount, mealsEquivalent. No cash-suggestive field (cashBalance/withdrawable/bankBalance or similar) is ever present — see BACKEND_RULES.md §20.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          200: {
+            description: 'Fund summary retrieved',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/CampaignFundSummaryResponse' },
+              },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          403: {
+            description: 'Not the campaign owner',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          404: {
+            description: 'Campaign or fund not found',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/campaigns/{id}/donations': {
+      get: {
+        tags: ['Campaigns'],
+        summary: 'List sanitized donations for a campaign (owner only)',
+        description: 'Donor identity is reduced to name only — email/phone are never exposed to the org.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          200: {
+            description: 'Donations retrieved',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/SanitizedDonationListResponse' },
+              },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          403: {
+            description: 'Not the campaign owner',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/webhooks/paystack': {
+      post: {
+        tags: ['Webhooks'],
+        summary: 'Paystack payment webhook (not called by frontend clients)',
+        description:
+          'Public endpoint — no bearer auth. The HMAC-SHA512 signature in the x-paystack-signature header (verified against the raw request body) IS the authentication. Always responds 200 once the signature is valid and the event is logged, before async processing runs. Idempotent: replays of the same event are detected and skipped.',
+        responses: {
+          200: {
+            description:
+              'Event received (does not imply processing has finished, only that it was accepted)',
+          },
+          400: {
+            description: 'Missing/invalid signature, or invalid JSON payload',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+                examples: {
+                  InvalidSignature: {
+                    value: {
+                      status: false,
+                      message: 'Invalid signature',
+                      error: { code: ErrorCode.INVALID_WEBHOOK_SIGNATURE },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
   },
   components: {
     securitySchemes: {
@@ -2047,6 +3709,672 @@ export const openApiDocument = {
             type: 'string',
             description: 'Required when decision is rejected.',
             example: 'Document image was unreadable',
+          },
+        },
+      },
+      ProductSeller: {
+        type: 'object',
+        description: 'Badge-only seller info shown to buyers — never the full user record.',
+        properties: {
+          _id: { type: 'string' },
+          organizationName: { type: 'string', example: 'Acme Farms' },
+          organizationType: {
+            type: 'string',
+            enum: Object.values(OrganizationType),
+            example: OrganizationType.FARMER,
+          },
+          verificationStatus: {
+            type: 'string',
+            enum: Object.values(VerificationStatus),
+            example: VerificationStatus.VERIFIED,
+          },
+        },
+      },
+      ProductImage: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', format: 'uri' },
+          publicId: { type: 'string' },
+        },
+      },
+      ProductLocation: {
+        type: 'object',
+        required: ['state', 'lga'],
+        properties: {
+          state: { type: 'string', example: 'Lagos' },
+          lga: { type: 'string', example: 'Ikeja' },
+        },
+      },
+      Product: {
+        type: 'object',
+        properties: {
+          _id: { type: 'string' },
+          seller: { $ref: '#/components/schemas/ProductSeller' },
+          name: { type: 'string', example: 'Fresh Tomatoes' },
+          category: { type: 'string', example: 'Vegetables' },
+          description: { type: 'string' },
+          price: { type: 'number', example: 5000 },
+          unit: { type: 'string', example: 'crate' },
+          quantityAvailable: { type: 'number', example: 50 },
+          minimumOrder: { type: 'number', example: 2 },
+          images: { type: 'array', items: { $ref: '#/components/schemas/ProductImage' } },
+          location: { $ref: '#/components/schemas/ProductLocation' },
+          isActive: { type: 'boolean', example: true },
+          isApproved: { type: 'boolean', example: true },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      ProductSuccessResponse: {
+        allOf: [
+          { $ref: '#/components/schemas/SuccessResponse' },
+          {
+            type: 'object',
+            properties: { data: { $ref: '#/components/schemas/Product' } },
+          },
+        ],
+      },
+      PaginationMeta: {
+        type: 'object',
+        properties: {
+          page: { type: 'integer', example: 1 },
+          limit: { type: 'integer', example: 20 },
+          total: { type: 'integer', example: 42 },
+          totalPages: { type: 'integer', example: 3 },
+        },
+      },
+      ProductListResponse: {
+        allOf: [
+          { $ref: '#/components/schemas/SuccessResponse' },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'object',
+                properties: {
+                  products: { type: 'array', items: { $ref: '#/components/schemas/Product' } },
+                  meta: { $ref: '#/components/schemas/PaginationMeta' },
+                },
+              },
+            },
+          },
+        ],
+      },
+      CreateProductRequest: {
+        type: 'object',
+        required: [
+          'name',
+          'category',
+          'description',
+          'price',
+          'unit',
+          'quantityAvailable',
+          'minimumOrder',
+          'state',
+          'lga',
+        ],
+        properties: {
+          name: { type: 'string', example: 'Fresh Tomatoes' },
+          category: { type: 'string', example: 'Vegetables' },
+          description: { type: 'string', example: 'Farm-fresh tomatoes, harvested weekly.' },
+          price: { type: 'number', example: 5000 },
+          unit: { type: 'string', example: 'crate' },
+          quantityAvailable: { type: 'number', example: 50 },
+          minimumOrder: { type: 'number', example: 2 },
+          state: { type: 'string', example: 'Lagos' },
+          lga: { type: 'string', example: 'Ikeja' },
+          images: {
+            type: 'array',
+            items: { type: 'string', format: 'binary' },
+            description: 'Up to 5 images (JPG or PNG), max 10MB each.',
+          },
+        },
+      },
+      UpdateProductRequest: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          description: { type: 'string' },
+          price: { type: 'number' },
+          unit: { type: 'string' },
+          quantityAvailable: { type: 'number' },
+          minimumOrder: { type: 'number' },
+          location: { $ref: '#/components/schemas/ProductLocation' },
+          isActive: { type: 'boolean' },
+        },
+      },
+      AddToCartRequest: {
+        type: 'object',
+        required: ['productId', 'quantity'],
+        properties: {
+          productId: { type: 'string', example: '60d0fe4f54e0d9001c23a4a1' },
+          quantity: {
+            type: 'integer',
+            minimum: 1,
+            description: 'Added to any existing quantity for this product.',
+            example: 2,
+          },
+        },
+      },
+      UpdateCartRequest: {
+        type: 'object',
+        required: ['productId', 'quantity'],
+        properties: {
+          productId: { type: 'string', example: '60d0fe4f54e0d9001c23a4a1' },
+          quantity: {
+            type: 'integer',
+            minimum: 0,
+            description: 'Exact quantity to set. 0 removes the item.',
+            example: 3,
+          },
+        },
+      },
+      AdjustCartQuantityRequest: {
+        type: 'object',
+        required: ['productId', 'delta'],
+        properties: {
+          productId: { type: 'string', example: '60d0fe4f54e0d9001c23a4a1' },
+          delta: {
+            type: 'integer',
+            enum: [1, -1],
+            description: 'Exactly 1 (increment) or -1 (decrement) — the stepper use case only.',
+            example: 1,
+          },
+        },
+      },
+      CartProduct: {
+        type: 'object',
+        nullable: true,
+        description: 'null if the referenced product no longer exists at all.',
+        properties: {
+          _id: { type: 'string' },
+          name: { type: 'string', example: 'Fresh Tomatoes' },
+          price: { type: 'number', example: 5000 },
+          unit: { type: 'string', example: 'crate' },
+          image: { type: 'string', format: 'uri', nullable: true },
+          seller: {
+            type: 'object',
+            nullable: true,
+            properties: { organizationName: { type: 'string', example: 'Acme Farms' } },
+          },
+        },
+      },
+      CartItem: {
+        type: 'object',
+        properties: {
+          product: { $ref: '#/components/schemas/CartProduct' },
+          quantity: { type: 'integer', example: 2 },
+          unavailable: {
+            type: 'boolean',
+            description: 'true if the product is no longer active/approved (or was deleted).',
+            example: false,
+          },
+          lineTotal: { type: 'number', description: '0 when unavailable.', example: 10000 },
+        },
+      },
+      Cart: {
+        type: 'object',
+        properties: {
+          items: { type: 'array', items: { $ref: '#/components/schemas/CartItem' } },
+          subtotal: {
+            type: 'number',
+            description: 'Sum of lineTotal across available items only.',
+            example: 10000,
+          },
+          totalItems: {
+            type: 'integer',
+            description: 'Sum of quantity across available items only.',
+            example: 2,
+          },
+        },
+      },
+      CartSuccessResponse: {
+        allOf: [
+          { $ref: '#/components/schemas/SuccessResponse' },
+          {
+            type: 'object',
+            properties: { data: { $ref: '#/components/schemas/Cart' } },
+          },
+        ],
+      },
+      DeliveryAddress: {
+        type: 'object',
+        properties: {
+          _id: { type: 'string' },
+          label: { type: 'string', example: 'Home' },
+          street: { type: 'string', example: '12 Allen Avenue' },
+          city: { type: 'string', example: 'Ikeja' },
+          state: { type: 'string', enum: NIGERIAN_STATES, example: 'Lagos' },
+          phone: { type: 'string', example: '+2348012345678' },
+          isDefault: { type: 'boolean', example: true },
+        },
+      },
+      AddressListResponse: {
+        allOf: [
+          { $ref: '#/components/schemas/SuccessResponse' },
+          {
+            type: 'object',
+            properties: {
+              data: { type: 'array', items: { $ref: '#/components/schemas/DeliveryAddress' } },
+            },
+          },
+        ],
+      },
+      CreateAddressRequest: {
+        type: 'object',
+        required: ['label', 'street', 'city', 'state', 'phone'],
+        properties: {
+          label: { type: 'string', example: 'Home' },
+          street: { type: 'string', example: '12 Allen Avenue' },
+          city: { type: 'string', example: 'Ikeja' },
+          state: { type: 'string', enum: NIGERIAN_STATES, example: 'Lagos' },
+          phone: { type: 'string', example: '+2348012345678' },
+        },
+      },
+      UpdateAddressRequest: {
+        type: 'object',
+        description:
+          'All fields optional — only what is sent is changed. isDefault is not accepted here.',
+        properties: {
+          label: { type: 'string', example: 'Office' },
+          street: { type: 'string', example: '5 Adeola Odeku Street' },
+          city: { type: 'string', example: 'Victoria Island' },
+          state: { type: 'string', enum: NIGERIAN_STATES, example: 'Lagos' },
+          phone: { type: 'string', example: '+2348012345678' },
+        },
+      },
+      CheckoutRequest: {
+        type: 'object',
+        required: ['addressId', 'deliveryMethod'],
+        properties: {
+          addressId: { type: 'string', example: '60d0fe4f54e0d9001c23a4a1' },
+          deliveryMethod: {
+            type: 'string',
+            enum: Object.values(DeliveryMethod),
+            example: 'delivery',
+          },
+        },
+      },
+      OrderItem: {
+        type: 'object',
+        description:
+          'productName/unitPrice are snapshotted at checkout time — opposite of Cart, which stays live.',
+        properties: {
+          product: { type: 'string' },
+          seller: { type: 'string' },
+          productName: { type: 'string', example: 'Fresh Tomatoes' },
+          unitPrice: { type: 'number', example: 5000 },
+          quantity: { type: 'integer', example: 2 },
+          subtotal: { type: 'number', example: 10000 },
+        },
+      },
+      OrderDeliveryAddress: {
+        type: 'object',
+        description: 'Snapshot of the saved address at checkout time, not a live reference.',
+        properties: {
+          label: { type: 'string', example: 'Home' },
+          street: { type: 'string', example: '12 Allen Avenue' },
+          city: { type: 'string', example: 'Ikeja' },
+          state: { type: 'string', example: 'Lagos' },
+          phone: { type: 'string', example: '+2348012345678' },
+        },
+      },
+      Order: {
+        type: 'object',
+        properties: {
+          _id: { type: 'string' },
+          orderNumber: { type: 'string', example: 'ORD-20260812-3F2A9C' },
+          checkoutReference: { type: 'string', example: 'CHF-1755000000000-a1b2c3d4' },
+          buyer: { type: 'string' },
+          items: { type: 'array', items: { $ref: '#/components/schemas/OrderItem' } },
+          deliveryAddress: { $ref: '#/components/schemas/OrderDeliveryAddress' },
+          deliveryMethod: { type: 'string', enum: Object.values(DeliveryMethod) },
+          subtotal: { type: 'number', example: 10000 },
+          deliveryFee: { type: 'number', example: 1500 },
+          total: { type: 'number', example: 11500 },
+          paymentStatus: {
+            type: 'string',
+            enum: ['pending', 'completed', 'failed'],
+            example: 'pending',
+          },
+          orderStatus: { type: 'string', enum: Object.values(OrderStatus), example: 'pending' },
+          deliveredAt: { type: 'string', format: 'date-time', nullable: true },
+          proofOfDeliveryImages: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: { url: { type: 'string' }, publicId: { type: 'string' } },
+            },
+          },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      OrderSuccessResponse: {
+        allOf: [
+          { $ref: '#/components/schemas/SuccessResponse' },
+          { type: 'object', properties: { data: { $ref: '#/components/schemas/Order' } } },
+        ],
+      },
+      OrderListResponse: {
+        allOf: [
+          { $ref: '#/components/schemas/SuccessResponse' },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'object',
+                properties: {
+                  orders: { type: 'array', items: { $ref: '#/components/schemas/Order' } },
+                  meta: { $ref: '#/components/schemas/PaginationMeta' },
+                },
+              },
+            },
+          },
+        ],
+      },
+      CheckoutSuccessResponse: {
+        allOf: [
+          { $ref: '#/components/schemas/SuccessResponse' },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'object',
+                properties: {
+                  orders: { type: 'array', items: { $ref: '#/components/schemas/Order' } },
+                  paymentUrl: {
+                    type: 'string',
+                    format: 'uri',
+                    description: 'Redirect the buyer here to complete payment on Paystack.',
+                  },
+                  checkoutReference: { type: 'string' },
+                },
+              },
+            },
+          },
+        ],
+      },
+      UpdateOrderStatusRequest: {
+        type: 'object',
+        required: ['status'],
+        properties: {
+          status: { type: 'string', enum: Object.values(OrderStatus), example: 'confirmed' },
+        },
+      },
+      CampaignImage: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', format: 'uri' },
+          publicId: { type: 'string' },
+        },
+      },
+      CampaignFoodGoal: {
+        type: 'object',
+        properties: {
+          description: { type: 'string', example: '500 bags of rice' },
+          quantity: { type: 'number', example: 500 },
+          unit: { type: 'string', example: 'bags' },
+        },
+      },
+      CampaignLocation: {
+        type: 'object',
+        properties: {
+          state: { type: 'string', example: 'Lagos' },
+          lga: { type: 'string', example: 'Ikeja' },
+        },
+      },
+      CampaignOrganization: {
+        type: 'object',
+        description: 'Badge-only org info shown to donors — never the full user record.',
+        properties: {
+          _id: { type: 'string' },
+          organizationName: { type: 'string', example: 'Hope Foundation' },
+          organizationType: { type: 'string', enum: Object.values(OrganizationType) },
+        },
+      },
+      CampaignUpdate: {
+        type: 'object',
+        properties: {
+          message: { type: 'string' },
+          postedAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      CampaignDistributionRecord: {
+        type: 'object',
+        properties: {
+          date: { type: 'string', format: 'date-time' },
+          quantity: { type: 'number' },
+          beneficiaries: { type: 'number' },
+          location: { type: 'string' },
+          media: { type: 'array', items: { $ref: '#/components/schemas/CampaignImage' } },
+        },
+      },
+      Campaign: {
+        type: 'object',
+        properties: {
+          _id: { type: 'string' },
+          organization: { $ref: '#/components/schemas/CampaignOrganization' },
+          title: { type: 'string', example: 'Emergency Flood Relief Food Drive' },
+          description: { type: 'string' },
+          urgencyLevel: { type: 'string', enum: Object.values(UrgencyLevel) },
+          fundingGoal: { type: 'number', example: 100000 },
+          currentFunding: { type: 'number', example: 25000 },
+          donorCount: { type: 'integer', example: 5 },
+          foodGoal: { $ref: '#/components/schemas/CampaignFoodGoal' },
+          distributionPlan: { type: 'string' },
+          location: { $ref: '#/components/schemas/CampaignLocation' },
+          images: { type: 'array', items: { $ref: '#/components/schemas/CampaignImage' } },
+          status: { type: 'string', enum: Object.values(CampaignStatus) },
+          rejectionReason: { type: 'string' },
+          startDate: { type: 'string', format: 'date-time' },
+          endDate: { type: 'string', format: 'date-time' },
+          campaignUpdates: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/CampaignUpdate' },
+          },
+          distributionRecords: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/CampaignDistributionRecord' },
+          },
+          percentage: {
+            type: 'integer',
+            description: 'Computed: min(100, round(currentFunding / fundingGoal * 100)).',
+            example: 25,
+          },
+          daysLeft: { type: 'integer', description: 'Computed from endDate.', example: 12 },
+          totalDonors: { type: 'integer', description: 'Alias of donorCount.', example: 5 },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      CampaignSuccessResponse: {
+        allOf: [
+          { $ref: '#/components/schemas/SuccessResponse' },
+          { type: 'object', properties: { data: { $ref: '#/components/schemas/Campaign' } } },
+        ],
+      },
+      CampaignListResponse: {
+        allOf: [
+          { $ref: '#/components/schemas/SuccessResponse' },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'object',
+                properties: {
+                  campaigns: { type: 'array', items: { $ref: '#/components/schemas/Campaign' } },
+                  meta: { $ref: '#/components/schemas/PaginationMeta' },
+                },
+              },
+            },
+          },
+        ],
+      },
+      CampaignListRaw: {
+        description: 'Admin listing — plain array, no pagination, same shape as OrganizationListResponse.',
+        allOf: [
+          { $ref: '#/components/schemas/SuccessResponse' },
+          {
+            type: 'object',
+            properties: { data: { type: 'array', items: { $ref: '#/components/schemas/Campaign' } } },
+          },
+        ],
+      },
+      CreateCampaignRequest: {
+        type: 'object',
+        required: [
+          'title',
+          'description',
+          'urgencyLevel',
+          'fundingGoal',
+          'foodGoalDescription',
+          'foodGoalQuantity',
+          'foodGoalUnit',
+          'state',
+          'lga',
+          'startDate',
+          'endDate',
+        ],
+        properties: {
+          title: { type: 'string', minLength: 10, maxLength: 100 },
+          description: { type: 'string', minLength: 50 },
+          urgencyLevel: { type: 'string', enum: Object.values(UrgencyLevel) },
+          fundingGoal: { type: 'number', example: 100000 },
+          foodGoalDescription: { type: 'string', example: '500 bags of rice' },
+          foodGoalQuantity: { type: 'number', example: 500 },
+          foodGoalUnit: { type: 'string', example: 'bags' },
+          distributionPlan: { type: 'string' },
+          state: { type: 'string', example: 'Lagos' },
+          lga: { type: 'string', example: 'Ikeja' },
+          startDate: { type: 'string', format: 'date' },
+          endDate: { type: 'string', format: 'date' },
+          images: {
+            type: 'array',
+            items: { type: 'string', format: 'binary' },
+            description: 'Up to 5 images (JPG or PNG), max 10MB each.',
+          },
+        },
+      },
+      UpdateCampaignRequest: {
+        type: 'object',
+        properties: {
+          description: { type: 'string' },
+          distributionPlan: { type: 'string' },
+          urgencyLevel: { type: 'string', enum: Object.values(UrgencyLevel) },
+          fundingGoal: {
+            type: 'number',
+            description: 'Rejected with 400 once currentFunding > 0.',
+          },
+        },
+      },
+      PostCampaignUpdateRequest: {
+        type: 'object',
+        required: ['message'],
+        properties: { message: { type: 'string', example: 'We distributed the first batch today.' } },
+      },
+      AddDistributionRecordRequest: {
+        type: 'object',
+        required: ['date', 'quantity', 'beneficiaries', 'location'],
+        properties: {
+          date: { type: 'string', format: 'date' },
+          quantity: { type: 'number', example: 100 },
+          beneficiaries: { type: 'integer', example: 40 },
+          location: { type: 'string', example: 'Ikeja Community Hall' },
+          media: {
+            type: 'array',
+            items: { type: 'string', format: 'binary' },
+            description: 'Up to 5 images (JPG or PNG), max 10MB each.',
+          },
+        },
+      },
+      DonateRequest: {
+        type: 'object',
+        required: ['amount'],
+        properties: {
+          amount: {
+            type: 'number',
+            description: 'In Naira. Rejected below DONATION_MINIMUM_KOBO (₦500).',
+            example: 2500,
+          },
+        },
+      },
+      DonateSuccessResponse: {
+        allOf: [
+          { $ref: '#/components/schemas/SuccessResponse' },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'object',
+                properties: {
+                  paymentUrl: {
+                    type: 'string',
+                    format: 'uri',
+                    description: 'Redirect the donor here to complete payment on Paystack.',
+                  },
+                  reference: { type: 'string', example: 'CHF-DON-1755000000000-a1b2c3d4' },
+                },
+              },
+            },
+          },
+        ],
+      },
+      CampaignFundSummary: {
+        type: 'object',
+        description:
+          'EXACTLY these 6 fields — no cash-suggestive field is ever added here. See BACKEND_RULES.md §20.',
+        properties: {
+          totalDonated: { type: 'number', example: 25000 },
+          totalAllocatedToFood: {
+            type: 'number',
+            description: 'Stays 0 until the future procurement-conversion phase exists.',
+            example: 0,
+          },
+          totalDelivered: { type: 'number', example: 0 },
+          availableForProcurement: { type: 'number', example: 25000 },
+          donorCount: { type: 'integer', example: 5 },
+          mealsEquivalent: { type: 'integer', description: 'floor(totalDonated / 500).', example: 50 },
+        },
+      },
+      CampaignFundSummaryResponse: {
+        allOf: [
+          { $ref: '#/components/schemas/SuccessResponse' },
+          {
+            type: 'object',
+            properties: { data: { $ref: '#/components/schemas/CampaignFundSummary' } },
+          },
+        ],
+      },
+      SanitizedDonation: {
+        type: 'object',
+        description: 'Donor identity reduced to name only — no email/phone.',
+        properties: {
+          donorName: { type: 'string', example: 'Jane Doe' },
+          amount: { type: 'number', example: 2500 },
+          donatedAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      SanitizedDonationListResponse: {
+        allOf: [
+          { $ref: '#/components/schemas/SuccessResponse' },
+          {
+            type: 'object',
+            properties: {
+              data: { type: 'array', items: { $ref: '#/components/schemas/SanitizedDonation' } },
+            },
+          },
+        ],
+      },
+      ReviewCampaignRequest: {
+        type: 'object',
+        required: ['decision'],
+        properties: {
+          decision: { type: 'string', enum: ['approved', 'rejected'], example: 'approved' },
+          rejectionReason: {
+            type: 'string',
+            description: 'Required when decision is rejected.',
+            example: 'Missing distribution plan detail',
           },
         },
       },

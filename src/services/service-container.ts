@@ -12,6 +12,22 @@ import { CloudinaryDocumentStorage } from '../integrations/cloudinary/cloudinary
 import { VerificationDocumentRepository } from '../repositories/verification-document.repository';
 import { DocumentService } from './document.service';
 import { AdminService } from './admin.service';
+import { ProductRepository } from '../repositories/product.repository';
+import { ProductService } from './product.service';
+import { CartRepository } from '../repositories/cart.repository';
+import { CartService } from './cart.service';
+import { UserService } from './user.service';
+import { PaystackGateway } from '../integrations/paystack/paystack.gateway';
+import { TransactionRepository } from '../repositories/transaction.repository';
+import { WebhookLogRepository } from '../repositories/webhook-log.repository';
+import { OrderRepository } from '../repositories/order.repository';
+import { PaymentService } from './payment.service';
+import { OrderService } from './order.service';
+import { RedisLock } from '../integrations/redis/redis.lock';
+import { CampaignRepository } from '../repositories/campaign.repository';
+import { CampaignFundRepository } from '../repositories/campaign-fund.repository';
+import { CampaignFundService } from './campaign-fund.service';
+import { CampaignService } from './campaign.service';
 
 export const refreshTokenStore = new RedisRefreshTokenStore();
 export const tokenBlacklistStore = new RedisTokenBlacklistStore();
@@ -26,10 +42,18 @@ export const otpService = new OtpService(otpStore, emailProvider, userRepository
 export const documentStorage = new CloudinaryDocumentStorage();
 export const verificationDocumentRepository = new VerificationDocumentRepository();
 
+export const campaignRepository = new CampaignRepository();
+export const campaignFundRepository = new CampaignFundRepository();
+export const campaignFundService = new CampaignFundService(
+  campaignFundRepository,
+  campaignRepository
+);
+
 export const adminService = new AdminService(
   userRepository,
   verificationDocumentRepository,
-  emailProvider
+  emailProvider,
+  campaignRepository
 );
 export const documentService = new DocumentService(
   userRepository,
@@ -42,4 +66,52 @@ export const passwordService = new PasswordService(
   otpService,
   refreshTokenStore,
   authService
+);
+
+export const productRepository = new ProductRepository();
+export const productService = new ProductService(
+  productRepository,
+  userRepository,
+  documentStorage
+);
+
+export const cartRepository = new CartRepository();
+export const cartService = new CartService(cartRepository, productRepository);
+
+export const userService = new UserService(userRepository);
+
+export const paymentGateway = new PaystackGateway();
+export const transactionRepository = new TransactionRepository();
+export const webhookLogRepository = new WebhookLogRepository();
+export const orderRepository = new OrderRepository();
+
+export const paymentService = new PaymentService(
+  paymentGateway,
+  transactionRepository,
+  orderRepository,
+  cartRepository,
+  webhookLogRepository,
+  userRepository,
+  emailProvider,
+  campaignRepository,
+  campaignFundService
+);
+
+export const checkoutLock = new RedisLock();
+
+export const orderService = new OrderService(
+  orderRepository,
+  cartRepository,
+  productRepository,
+  userRepository,
+  paymentService,
+  checkoutLock
+);
+
+export const campaignService = new CampaignService(
+  campaignRepository,
+  campaignFundService,
+  userRepository,
+  documentStorage,
+  paymentService
 );

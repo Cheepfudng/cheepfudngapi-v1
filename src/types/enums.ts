@@ -26,6 +26,8 @@ export enum VerificationStatus {
 export enum OrderStatus {
   PENDING = 'pending',
   CONFIRMED = 'confirmed',
+  PREPARING = 'preparing',
+  IN_TRANSIT = 'in_transit',
   DELIVERED = 'delivered',
   CANCELLED = 'cancelled',
 }
@@ -36,6 +38,16 @@ export enum PaymentStatus {
   FAILED = 'failed',
 }
 
+export enum DeliveryMethod {
+  DELIVERY = 'delivery',
+  PICKUP = 'pickup',
+}
+
+export enum TransactionType {
+  PRODUCT_PURCHASE = 'product_purchase',
+  CAMPAIGN_DONATION = 'campaign_donation',
+}
+
 export enum OrganizationType {
   FARMER = 'farmer',
   VENDOR = 'vendor',
@@ -43,4 +55,19 @@ export enum OrganizationType {
   FOUNDATION = 'foundation',
   RELIGIOUS_BODY = 'religious_body',
   AGENCY = 'agency',
+}
+
+export enum UrgencyLevel {
+  CRITICAL = 'critical',
+  HIGH = 'high',
+  MEDIUM = 'medium',
+  LOW = 'low',
+}
+
+export enum CampaignStatus {
+  PENDING_APPROVAL = 'pending_approval',
+  ACTIVE = 'active',
+  REJECTED = 'rejected',
+  COMPLETED = 'completed',
+  CANCELLED = 'cancelled',
 }

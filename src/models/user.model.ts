@@ -30,6 +30,11 @@ export interface IUser extends Document {
 
   organizationName?: string;
   organizationType?: OrganizationType;
+  // Org's "what we do" / mission statement. Conceptually role: organization only, but no
+  // schema-level discriminator — same pattern as organizationName/organizationType.
+  // Onboarding-time only for now; there's no edit-after-onboarding endpoint yet (see
+  // PROJECT_STATE.md).
+  description?: string;
 
   password: string;
   passwordChangedAt?: Date;
@@ -128,6 +133,10 @@ const userSchema = new Schema<IUser>(
       enum: Object.values(OrganizationType),
       trim: true,
     },
+    // Max length enforced at the validator level (clearer error message there) rather
+    // than schema maxlength, matching how deliveryAddresses' max-5 rule lives in the
+    // service layer, not the schema.
+    description: { type: String, trim: true },
 
     // Max 5 enforced in UserService, not here — a schema-level array length limit
     // doesn't give a good validation error message.

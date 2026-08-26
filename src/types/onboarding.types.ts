@@ -14,6 +14,7 @@ export interface OrganizationOnboardingInput {
   phoneNumber: string;
   password: string;
   confirmPassword: string;
+  description?: string;
 }
 
 export interface OnboardingUser {

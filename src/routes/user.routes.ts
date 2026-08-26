@@ -6,6 +6,7 @@ import { validateRequest } from '../middleware/validation.middleware';
 import {
   addressIdParamValidation,
   createAddressValidation,
+  listDonationsValidation,
   updateAddressValidation,
 } from '../validators/user.validator';
 import { asyncHandler } from '../utils/async-handler';
@@ -38,6 +39,15 @@ router.patch(
   addressIdParamValidation,
   validateRequest,
   asyncHandler(userController.setDefaultAddress)
+);
+
+// Any authenticated user can have donated (including an org), so no role restriction beyond
+// the router-level protect above.
+router.get(
+  '/donations',
+  listDonationsValidation,
+  validateRequest,
+  asyncHandler(userController.listDonations)
 );
 
 export default router;

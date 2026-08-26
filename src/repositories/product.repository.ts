@@ -2,6 +2,7 @@ import { ClientSession, FilterQuery } from 'mongoose';
 
 import { IProduct, ProductModel } from '../models/product.model';
 import { UserModel } from '../models/user.model';
+import { ProductModerationStatus } from '../types/enums';
 
 export interface ProductPagination {
   page: number;
@@ -12,6 +13,13 @@ export interface ProductPagination {
 export interface PaginatedProducts {
   items: IProduct[];
   total: number;
+}
+
+export interface AdminProductFilter {
+  isActive?: boolean;
+  moderationStatus?: ProductModerationStatus;
+  category?: string;
+  sellerId?: string;
 }
 
 const PUBLIC_SELLER_FIELDS = 'organizationName organizationType verificationStatus';
@@ -51,12 +59,43 @@ export class ProductRepository {
     return { items, total };
   }
 
+  // Admin listing (Phase 15): deliberately does NOT run the deactivated-seller/isActive
+  // exclusion that findMany applies for public browsing — admin needs to see everything,
+  // including inactive products and products belonging to deactivated organizations.
+  async findManyAdmin(
+    filter: AdminProductFilter,
+    pagination: ProductPagination
+  ): Promise<PaginatedProducts> {
+    const { page, limit, sort } = pagination;
+    const skip = (page - 1) * limit;
+
+    const query: FilterQuery<IProduct> = {};
+    if (filter.isActive !== undefined) query.isActive = filter.isActive;
+    if (filter.moderationStatus) query.moderationStatus = filter.moderationStatus;
+    if (filter.category) query.category = filter.category;
+    if (filter.sellerId) query.seller = filter.sellerId;
+
+    const [items, total] = await Promise.all([
+      ProductModel.find(query).populate('seller', PUBLIC_SELLER_FIELDS).sort(sort).skip(skip).limit(limit),
+      ProductModel.countDocuments(query),
+    ]);
+
+    return { items, total };
+  }
+
   async updateById(productId: string, data: Partial<IProduct>): Promise<IProduct | null> {
     return ProductModel.findByIdAndUpdate(productId, data, { new: true, runValidators: true });
   }
 
   async existsById(productId: string): Promise<boolean> {
     return ProductModel.exists({ _id: productId }).then(Boolean);
+  }
+
+  // Dashboard stat: counts only the seller's currently-active listings, not soft-deleted
+  // ones — matches what an org would consider "my current product count," same isActive
+  // sense as the public listing filter.
+  async countBySeller(sellerId: string): Promise<number> {
+    return ProductModel.countDocuments({ seller: sellerId, isActive: true });
   }
 
   // Atomic overselling guard: the $gte condition and the decrement happen in one Mongo

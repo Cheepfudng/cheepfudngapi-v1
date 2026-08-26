@@ -25,6 +25,16 @@ export interface SanitizedDonation {
   donatedAt: Date;
 }
 
+export interface DonationPagination {
+  page: number;
+  limit: number;
+}
+
+export interface PaginatedSanitizedDonations {
+  items: SanitizedDonation[];
+  total: number;
+}
+
 export class CampaignFundService {
   constructor(
     private readonly campaignFundRepository: CampaignFundRepository,
@@ -99,11 +109,29 @@ export class CampaignFundService {
   }
 
   // Donor identity reduced to name only — never expose email/phone to the campaign org.
-  async getSanitizedDonations(campaignId: string): Promise<SanitizedDonation[]> {
+  // Phase 16: paginated — a popular campaign's donations array has no upper bound, unlike
+  // e.g. delivery addresses (hard-capped at 5), so this genuinely needed the fix, not just
+  // an audit note. `donations` is an embedded subdocument array on a single CampaignFund
+  // document (not a separate collection), so there's only ever one document read here
+  // regardless of page — pagination is applied in-memory after sorting most-recent-first,
+  // rather than an aggregation $unwind/$skip/$limit, since the underlying data model is
+  // already a single-document read either way.
+  async getSanitizedDonations(
+    campaignId: string,
+    pagination: DonationPagination
+  ): Promise<PaginatedSanitizedDonations> {
     const fund = await this.campaignFundRepository.findByCampaignWithDonors(campaignId);
     if (!fund) throw new AppError('Campaign fund not found', 404, ErrorCode.CAMPAIGN_NOT_FOUND);
 
-    return fund.donations.map((donation) => {
+    const sorted = [...fund.donations].sort(
+      (a, b) => b.donatedAt.getTime() - a.donatedAt.getTime()
+    );
+
+    const { page, limit } = pagination;
+    const start = (page - 1) * limit;
+    const pageOfDonations = sorted.slice(start, start + limit);
+
+    const items = pageOfDonations.map((donation) => {
       const donor = donation.donor as unknown as
         | { firstName?: string; lastName?: string }
         | Types.ObjectId;
@@ -116,5 +144,7 @@ export class CampaignFundService {
         donatedAt: donation.donatedAt,
       };
     });
+
+    return { items, total: fund.donations.length };
   }
 }

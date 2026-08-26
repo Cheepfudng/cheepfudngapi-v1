@@ -48,5 +48,11 @@ export const organizationOnboardingValidation = [
     .matches(/^\+?[1-9]\d{7,14}$/)
     .withMessage('A valid phone number is required'),
 
+  body('description')
+    .optional({ values: 'falsy' })
+    .trim()
+    .isLength({ max: 1000 })
+    .withMessage('description cannot exceed 1000 characters'),
+
   ...passwordRules,
 ];

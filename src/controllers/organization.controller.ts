@@ -1,6 +1,6 @@
 import { Response } from 'express';
 
-import { documentService } from '../services/service-container';
+import { documentService, organizationService } from '../services/service-container';
 import { sendSuccess } from '../utils/api-response';
 import { AuthRequest } from '../types/auth.types';
 import { AppError } from '../errors/app-error';
@@ -36,9 +36,11 @@ export class OrganizationController {
     return sendSuccess(res, 200, 'Verification status retrieved', result);
   };
   dashboard = async (req: AuthRequest, res: Response): Promise<Response> => {
-    return sendSuccess(res, 200, 'Welcome to your organization dashboard', {
-      message: 'This route is only reachable by verified organizations.',
-    });
+    const stats = await organizationService.getDashboardStats(
+      req.user!.id,
+      req.user!.organizationType!
+    );
+    return sendSuccess(res, 200, 'Dashboard stats retrieved', stats);
   };
 }
 

@@ -6,7 +6,7 @@ import { DocumentStorage } from '../integrations/contracts/document-storage.inte
 import { IProduct } from '../models/product.model';
 import { ProductRepository } from '../repositories/product.repository';
 import { UserRepository } from '../repositories/user.repository';
-import { OrganizationType, UserRole, VerificationStatus } from '../types/enums';
+import { OrganizationType, ProductModerationStatus, UserRole, VerificationStatus } from '../types/enums';
 import { buildPaginationMeta, parsePagination } from '../utils/pagination';
 
 export interface ListProductsQuery {
@@ -69,7 +69,10 @@ export class ProductService {
   ) {}
 
   async listProducts(query: ListProductsQuery) {
-    const filter: FilterQuery<IProduct> = { isActive: true, isApproved: true };
+    const filter: FilterQuery<IProduct> = {
+      isActive: true,
+      moderationStatus: ProductModerationStatus.APPROVED,
+    };
 
     if (query.category) filter.category = query.category;
     if (query.state) filter['location.state'] = query.state;
@@ -97,14 +100,18 @@ export class ProductService {
 
   async getProductById(productId: string): Promise<IProduct> {
     const product = await this.productRepository.findById(productId);
-    if (!product || !product.isActive || !product.isApproved) {
+    if (
+      !product ||
+      !product.isActive ||
+      product.moderationStatus !== ProductModerationStatus.APPROVED
+    ) {
       throw new AppError('Product not found', 404, ErrorCode.PRODUCT_NOT_FOUND);
     }
 
     await product.populate('seller');
 
     // A deactivated organization's listings must disappear from public view — indistinguishable
-    // from the product itself not existing, same as the isActive/isApproved check above.
+    // from the product itself not existing, same as the isActive/moderationStatus check above.
     const seller = product.seller as unknown as { isActive?: boolean };
     if (seller?.isActive === false) {
       throw new AppError('Product not found', 404, ErrorCode.PRODUCT_NOT_FOUND);

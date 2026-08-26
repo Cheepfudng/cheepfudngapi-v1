@@ -1,11 +1,13 @@
 import { connectDatabase } from './config/database';
 import { env } from './config/env';
 import app from './app';
+import { startOrderExpiryJob } from './jobs/order-expiry.job';
 import { logger } from './utils/logger';
 
 const startServer = async (): Promise<void> => {
   try {
     await connectDatabase();
+    startOrderExpiryJob();
 
     app.listen(env.PORT, () => {
       logger.info(`🚀 Server running on port ${env.PORT}`);

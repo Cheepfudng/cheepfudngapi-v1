@@ -1,5 +1,6 @@
-import { body, param } from 'express-validator';
+import { body, param, query } from 'express-validator';
 
+import { PaymentStatus } from '../types/enums';
 import { NIGERIAN_STATES } from '../utils/constants';
 
 // Reuses the same Nigerian phone pattern as onboarding.validator.ts.
@@ -35,4 +36,13 @@ export const updateAddressValidation = [
     .trim()
     .matches(NIGERIAN_PHONE_REGEX)
     .withMessage('A valid phone number is required'),
+];
+
+export const listDonationsValidation = [
+  query('status').optional().isIn(Object.values(PaymentStatus)).withMessage('Invalid status'),
+  query('page').optional().isInt({ min: 1 }).withMessage('page must be a positive integer'),
+  query('limit')
+    .optional()
+    .isInt({ min: 1, max: 50 })
+    .withMessage('limit must be between 1 and 50'),
 ];

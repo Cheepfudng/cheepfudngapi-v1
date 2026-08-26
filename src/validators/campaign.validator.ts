@@ -19,6 +19,15 @@ export const campaignIdParamValidation = [
   param('id').isMongoId().withMessage('id must be a valid id'),
 ];
 
+export const listDonationsForCampaignValidation = [
+  ...campaignIdParamValidation,
+  query('page').optional().isInt({ min: 1 }).withMessage('page must be a positive integer'),
+  query('limit')
+    .optional()
+    .isInt({ min: 1, max: 50 })
+    .withMessage('limit must be between 1 and 50'),
+];
+
 export const createCampaignValidation = [
   body('title').trim().isLength({ min: 10, max: 100 }).withMessage('title must be 10-100 characters'),
   body('description')

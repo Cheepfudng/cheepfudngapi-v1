@@ -6,7 +6,12 @@ import { DocumentStorage } from '../integrations/contracts/document-storage.inte
 import { ICampaign, ICampaignImage } from '../models/campaign.model';
 import { CampaignRepository } from '../repositories/campaign.repository';
 import { UserRepository } from '../repositories/user.repository';
-import { CampaignFundService, CampaignFundSummary, SanitizedDonation } from './campaign-fund.service';
+import {
+  CampaignFundService,
+  CampaignFundSummary,
+  DonationPagination,
+  PaginatedSanitizedDonations,
+} from './campaign-fund.service';
 import { PaymentService } from './payment.service';
 import { CampaignStatus, OrganizationType, UrgencyLevel, UserRole, VerificationStatus } from '../types/enums';
 import { buildPaginationMeta, parsePagination } from '../utils/pagination';
@@ -211,9 +216,13 @@ export class CampaignService {
     return this.campaignFundService.getCampaignFundSummary(campaignId);
   }
 
-  async getDonations(campaignId: string, orgId: string): Promise<SanitizedDonation[]> {
+  async getDonations(
+    campaignId: string,
+    orgId: string,
+    pagination: DonationPagination
+  ): Promise<PaginatedSanitizedDonations> {
     await this.getOwnedCampaign(campaignId, orgId);
-    return this.campaignFundService.getSanitizedDonations(campaignId);
+    return this.campaignFundService.getSanitizedDonations(campaignId, pagination);
   }
 
   async donate(

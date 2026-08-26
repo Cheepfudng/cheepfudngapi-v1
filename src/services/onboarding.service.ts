@@ -89,6 +89,8 @@ export class OnboardingService {
     user.organizationName = input.organizationName;
     user.organizationType = input.organizationType;
     user.phoneNumber = input.phoneNumber;
+    // Optional — omitted entirely on existing/older onboarding payloads, no error either way.
+    if (input.description !== undefined) user.description = input.description;
     user.password = input.password;
     user.onboardingStatus = OnboardingStatus.COMPLETED;
     // Orgs stay pending until admin approves submitted documents (future phase)

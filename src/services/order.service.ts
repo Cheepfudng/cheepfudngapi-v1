@@ -1,5 +1,6 @@
 import mongoose, { Types } from 'mongoose';
 
+import { env } from '../config/env';
 import { AppError } from '../errors/app-error';
 import { ErrorCode } from '../errors/error-codes';
 import { RedisLock } from '../integrations/redis/redis.lock';
@@ -8,9 +9,17 @@ import { IProduct } from '../models/product.model';
 import { CartRepository } from '../repositories/cart.repository';
 import { OrderPagination, OrderRepository } from '../repositories/order.repository';
 import { ProductRepository } from '../repositories/product.repository';
+import { TransactionRepository } from '../repositories/transaction.repository';
 import { UserRepository } from '../repositories/user.repository';
 import { PaymentService } from './payment.service';
-import { DeliveryMethod, OrderStatus, PaymentStatus, UserRole } from '../types/enums';
+import {
+  CancellationReason,
+  DeliveryMethod,
+  OrderStatus,
+  PaymentStatus,
+  ProductModerationStatus,
+  UserRole,
+} from '../types/enums';
 import { DELIVERY_FEE_NGN } from '../utils/constants';
 import { logger } from '../utils/logger';
 import { generateCheckoutReference, generateOrderNumber } from '../utils/reference-generator';
@@ -43,6 +52,16 @@ interface DecrementedItem {
   quantity: number;
 }
 
+// Order.buyer and items[].seller are now populated by OrderRepository (Phase 17) wherever
+// an Order is returned to a client — a populated field is a different shape than the raw
+// Types.ObjectId these ownership checks used to assume (`.toString()` on a populated
+// Mongoose document does NOT return the id string, it falls back to
+// Object.prototype.toString and silently breaks every comparison below). This extracts the
+// underlying id regardless of whether the field arrived populated or raw, so ownership
+// checks stay correct either way.
+const refId = (ref: unknown): Types.ObjectId =>
+  ref instanceof Types.ObjectId ? ref : (ref as { _id: Types.ObjectId })._id;
+
 export class OrderService {
   constructor(
     private readonly orderRepository: OrderRepository,
@@ -50,7 +69,8 @@ export class OrderService {
     private readonly productRepository: ProductRepository,
     private readonly userRepository: UserRepository,
     private readonly paymentService: PaymentService,
-    private readonly checkoutLock: RedisLock
+    private readonly checkoutLock: RedisLock,
+    private readonly transactionRepository: TransactionRepository
   ) {}
 
   async checkout(buyerId: string, input: CheckoutInput): Promise<CheckoutResult> {
@@ -100,7 +120,11 @@ export class OrderService {
           const resolvedItems: { product: IProduct; quantity: number }[] = [];
           for (const item of cart.items) {
             const product = await this.productRepository.findById(item.product.toString(), session);
-            if (!product || !product.isActive || !product.isApproved) {
+            if (
+              !product ||
+              !product.isActive ||
+              product.moderationStatus !== ProductModerationStatus.APPROVED
+            ) {
               throw new AppError(
                 'One or more items in your cart are no longer available — please review your cart',
                 400,
@@ -221,10 +245,70 @@ export class OrderService {
 
     const updated = await this.orderRepository.updateByOrderNumber(orderNumber, {
       orderStatus: OrderStatus.CANCELLED,
+      cancellationReason: CancellationReason.BUYER_REQUESTED,
     });
     if (!updated) throw new AppError('Order not found', 404, ErrorCode.ORDER_NOT_FOUND);
 
     return updated;
+  }
+
+  // Auto-expiry (Phase 14): sweeps checkouts still paymentStatus: pending past
+  // ORDER_EXPIRY_MINUTES. Every sibling sharing a checkoutReference expires together, not
+  // just whichever one the initial stale-query happened to touch — a multi-seller checkout
+  // is one buyer-facing event, so it shouldn't half-expire. Grouped into one Mongo
+  // transaction per checkoutReference (same session.withTransaction pattern as Phase
+  // 11.5's checkout): every order in the group and the related Transaction commit or roll
+  // back together. Multi-instance-safe without a distributed lock — expireIfPending only
+  // claims an order still pending at write time, so an overlapping cron tick on another
+  // instance simply finds nothing left to claim.
+  async expireStaleOrders(): Promise<number> {
+    const cutoffDate = new Date(Date.now() - env.ORDER_EXPIRY_MINUTES * 60 * 1000);
+    const staleOrders = await this.orderRepository.findStalePendingOrders(cutoffDate);
+    if (staleOrders.length === 0) return 0;
+
+    const checkoutReferences = Array.from(new Set(staleOrders.map((o) => o.checkoutReference)));
+    let expiredCount = 0;
+
+    for (const checkoutReference of checkoutReferences) {
+      const siblings = await this.orderRepository.findByCheckoutReference(checkoutReference);
+      const candidates = siblings.filter(
+        (order) =>
+          order.paymentStatus === PaymentStatus.PENDING && order.orderStatus !== OrderStatus.CANCELLED
+      );
+      if (candidates.length === 0) continue;
+
+      const session = await mongoose.startSession();
+      try {
+        await session.withTransaction(async () => {
+          for (const order of candidates) {
+            const claimed = await this.orderRepository.expireIfPending(
+              order.orderNumber,
+              CancellationReason.PAYMENT_EXPIRED,
+              session
+            );
+            // null means it was already paid or cancelled concurrently between the read
+            // above and this write (e.g. a webhook landed in between) — nothing to restore.
+            if (!claimed) continue;
+
+            await this.orderRepository.restoreStockForItems(claimed.items, session);
+            expiredCount += 1;
+          }
+
+          await this.transactionRepository.markFailedIfPending(
+            checkoutReference,
+            { reason: 'payment_expired', expiredAt: new Date() },
+            session
+          );
+        });
+      } finally {
+        await session.endSession();
+      }
+    }
+
+    logger.info(
+      `Order auto-expiry: expired ${expiredCount} order(s) across ${checkoutReferences.length} checkout reference(s) checked`
+    );
+    return expiredCount;
   }
 
   async confirmDelivery(orderNumber: string, buyerId: string): Promise<IOrder> {
@@ -259,7 +343,7 @@ export class OrderService {
     const order = await this.orderRepository.findByOrderNumber(orderNumber);
     if (!order) throw new AppError('Order not found', 404, ErrorCode.ORDER_NOT_FOUND);
 
-    const ownsItem = order.items.some((item) => item.seller.toString() === sellerId);
+    const ownsItem = order.items.some((item) => refId(item.seller).equals(sellerId));
     if (!ownsItem) {
       throw new AppError(
         'You do not have permission to update this order',
@@ -316,7 +400,7 @@ export class OrderService {
     if (orders.length === 0)
       throw new AppError('Checkout event not found', 404, ErrorCode.ORDER_NOT_FOUND);
 
-    const isOwner = orders[0].buyer.toString() === requester.id;
+    const isOwner = refId(orders[0].buyer).equals(requester.id);
     if (!isOwner && requester.role !== UserRole.ADMIN) {
       throw new AppError(
         'You do not have permission to view this checkout event',
@@ -335,8 +419,8 @@ export class OrderService {
     const order = await this.orderRepository.findByOrderNumber(orderNumber);
     if (!order) throw new AppError('Order not found', 404, ErrorCode.ORDER_NOT_FOUND);
 
-    const isBuyer = order.buyer.toString() === requester.id;
-    const isSeller = order.items.some((item) => item.seller.toString() === requester.id);
+    const isBuyer = refId(order.buyer).equals(requester.id);
+    const isSeller = order.items.some((item) => refId(item.seller).equals(requester.id));
     const isAdmin = requester.role === UserRole.ADMIN;
 
     if (!isBuyer && !isSeller && !isAdmin) {
@@ -348,7 +432,7 @@ export class OrderService {
 
   private async getOwnedOrderForBuyer(orderNumber: string, buyerId: string): Promise<IOrder> {
     const order = await this.orderRepository.findByOrderNumber(orderNumber);
-    if (!order || order.buyer.toString() !== buyerId) {
+    if (!order || !refId(order.buyer).equals(buyerId)) {
       throw new AppError('Order not found', 404, ErrorCode.ORDER_NOT_FOUND);
     }
     return order;

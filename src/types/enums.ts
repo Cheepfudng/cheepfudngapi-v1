@@ -71,3 +71,19 @@ export enum CampaignStatus {
   COMPLETED = 'completed',
   CANCELLED = 'cancelled',
 }
+
+// Reuses OrderStatus.CANCELLED as the single source of truth for order state — this is
+// metadata about WHY, not a second status field that could drift from orderStatus.
+export enum CancellationReason {
+  BUYER_REQUESTED = 'buyer_requested',
+  PAYMENT_EXPIRED = 'payment_expired',
+}
+
+// Single source of truth for a product's review state (Phase 19) — replaces the old
+// isApproved boolean, which couldn't distinguish "never reviewed" from "explicitly
+// rejected." No separate isApproved field kept alongside this one.
+export enum ProductModerationStatus {
+  PENDING = 'pending',
+  APPROVED = 'approved',
+  REJECTED = 'rejected',
+}

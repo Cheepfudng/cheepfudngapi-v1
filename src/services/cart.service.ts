@@ -7,6 +7,7 @@ import { IProduct } from '../models/product.model';
 import { IUser } from '../models/user.model';
 import { CartRepository } from '../repositories/cart.repository';
 import { ProductRepository } from '../repositories/product.repository';
+import { ProductModerationStatus } from '../types/enums';
 
 export interface CartItemView {
   product: {
@@ -32,13 +33,13 @@ const EMPTY_CART_VIEW: CartView = { items: [], subtotal: 0, totalItems: 0 };
 
 const CART_PRODUCT_POPULATE = {
   path: 'items.product',
-  select: 'name price unit images isActive isApproved seller',
+  select: 'name price unit images isActive moderationStatus seller',
   populate: { path: 'seller', select: 'organizationName' },
 };
 
 interface PopulatedCartItem {
   product:
-    | (Pick<IProduct, 'name' | 'price' | 'unit' | 'images' | 'isActive' | 'isApproved'> & {
+    | (Pick<IProduct, 'name' | 'price' | 'unit' | 'images' | 'isActive' | 'moderationStatus'> & {
         _id: Types.ObjectId;
         seller?: Pick<IUser, 'organizationName'>;
       })
@@ -186,7 +187,11 @@ export class CartService {
 
   private async getPurchasableProduct(productId: string): Promise<IProduct> {
     const product = await this.productRepository.findById(productId);
-    if (!product || !product.isActive || !product.isApproved) {
+    if (
+      !product ||
+      !product.isActive ||
+      product.moderationStatus !== ProductModerationStatus.APPROVED
+    ) {
       throw new AppError('Product not found', 404, ErrorCode.PRODUCT_NOT_FOUND);
     }
     return product;
@@ -205,7 +210,8 @@ export class CartService {
 
     const items = plainItems.map((item): CartItemView => {
       const { product, quantity } = item;
-      const available = !!product && product.isActive && product.isApproved;
+      const available =
+        !!product && product.isActive && product.moderationStatus === ProductModerationStatus.APPROVED;
 
       if (available && product) {
         subtotal += product.price * quantity;

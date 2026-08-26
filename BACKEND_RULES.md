@@ -1087,6 +1087,22 @@ Avoid:
 - Exposing internal database structures unnecessarily.
 - Returning sensitive internal fields.
 
+## 30.1 Pagination is Mandatory for List Endpoints
+
+Every list/collection GET endpoint must return paginated results via the shared
+`pagination.ts` utility (`parsePagination` / `buildPaginationMeta`). No endpoint returns
+an unbounded plain array.
+
+Default `limit: 20`, max `limit: 50`, unless documented otherwise with a specific reason
+(e.g. a hard business cap on collection size, such as a max-5-addresses list, where
+pagination would be meaningless).
+
+This applies regardless of how unlikely a collection currently seems to grow — a list that
+looks small today (an admin queue, a campaign's donor list) can grow unbounded once the
+platform is in real use. Endpoints that return a single resource, a fixed/structurally
+small reference list (e.g. a document catalog), or an aggregate stats object are not list
+endpoints and are exempt.
+
 ---
 
 # 31. Idempotency and Duplicate Processing

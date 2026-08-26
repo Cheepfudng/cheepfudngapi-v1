@@ -87,5 +87,9 @@ export const env = {
   PAYSTACK_SECRET_KEY: getRequiredEnv('PAYSTACK_SECRET_KEY'),
   PAYSTACK_PUBLIC_KEY: getRequiredEnv('PAYSTACK_PUBLIC_KEY'),
 
+  // Real business tuning knob (unlike the cron schedule itself, which is a code constant) —
+  // how long a checkout can sit at paymentStatus: pending before the auto-expiry job cancels it.
+  ORDER_EXPIRY_MINUTES: getNumberEnv('ORDER_EXPIRY_MINUTES', 30),
+
   SENTRY_DSN: process.env.SENTRY_DSN?.trim() || undefined,
 } as const;

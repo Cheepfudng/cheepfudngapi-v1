@@ -1,5 +1,7 @@
 import { Document, Schema, model, Types } from 'mongoose';
 
+import { ProductModerationStatus } from '../types/enums';
+
 export interface IProductImage {
   url: string;
   publicId: string;
@@ -22,8 +24,11 @@ export interface IProduct extends Document {
   images: IProductImage[];
   location: IProductLocation;
   isActive: boolean;
-  // TODO: require admin approval in v1.1 — MVP auto-approves every product on creation
-  isApproved: boolean;
+  // Single source of truth for review state (Phase 19) — new products default to
+  // pending, not auto-approved. No separate isApproved boolean kept alongside this.
+  moderationStatus: ProductModerationStatus;
+  // Set only when moderationStatus is rejected — same pattern as Organizations/Campaigns.
+  rejectionReason?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -57,11 +62,16 @@ const productSchema = new Schema<IProduct>(
     images: { type: [productImageSchema], default: [] },
     location: { type: productLocationSchema, required: true },
     isActive: { type: Boolean, default: true },
-    isApproved: { type: Boolean, default: true },
+    moderationStatus: {
+      type: String,
+      enum: Object.values(ProductModerationStatus),
+      default: ProductModerationStatus.PENDING,
+    },
+    rejectionReason: { type: String, trim: true },
   },
   { timestamps: true }
 );
 
-productSchema.index({ isActive: 1, isApproved: 1 });
+productSchema.index({ isActive: 1, moderationStatus: 1 });
 
 export const ProductModel = model<IProduct>('Product', productSchema);

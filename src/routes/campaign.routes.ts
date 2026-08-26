@@ -14,6 +14,7 @@ import {
   createCampaignValidation,
   donateValidation,
   listCampaignsValidation,
+  listDonationsForCampaignValidation,
   postCampaignUpdateValidation,
   updateCampaignValidation,
 } from '../validators/campaign.validator';
@@ -87,7 +88,7 @@ router.get(
 router.get(
   '/:id/donations',
   ...ownerOnly,
-  campaignIdParamValidation,
+  listDonationsForCampaignValidation,
   validateRequest,
   asyncHandler(campaignController.getDonations)
 );

@@ -2,10 +2,13 @@ import { ErrorCode } from '../errors';
 import {
   AccountType,
   CampaignStatus,
+  CancellationReason,
   DeliveryMethod,
   OnboardingStatus,
   OrderStatus,
   OrganizationType,
+  PaymentStatus,
+  ProductModerationStatus,
   UrgencyLevel,
   UserRole,
   VerificationStatus,
@@ -1426,15 +1429,33 @@ export const openApiDocument = {
     '/v1/organizations/dashboard': {
       get: {
         tags: ['Organizations'],
-        summary: 'Organization dashboard (verified orgs only)',
+        summary: 'Organization dashboard stats (verified orgs only)',
         description:
-          'Blocked with 403 for role: organization users whose verificationStatus is not verified.',
+          'Replaces the Phase 6 placeholder. Middleware chain: protect -> requireRole(organization) -> requireVerifiedOrganization — the requireRole step is new as of Phase 13 (the old placeholder was deliberately reachable by any role to prove requireVerifiedOrganization ignored non-organization roles; real stats logic doesn\'t make sense for a non-organization account). Response shape branches on the org\'s category (supply vs campaign), discriminated by the `category` field. Supply: `revenue` is the sum of `order.subtotal` (NOT `order.total`) across the org\'s `paymentStatus: completed` orders — deliberately excludes deliveryFee, which isn\'t product revenue. Campaign: `totalRaised` sums `Campaign.currentFunding` (not a live CampaignFund re-read); `familiesReached` sums `beneficiaries` across every distributionRecords entry on all of the org\'s campaigns.',
         security: [{ bearerAuth: [] }],
         responses: {
           200: {
-            description: 'Dashboard data',
+            description: 'Dashboard stats retrieved',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/SuccessResponse' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/DashboardStatsResponse' },
+                examples: {
+                  SupplyOrg: {
+                    value: {
+                      status: true,
+                      message: 'Dashboard stats retrieved',
+                      data: { category: 'supply', totalProducts: 12, totalOrders: 34, revenue: 450000 },
+                    },
+                  },
+                  CampaignOrg: {
+                    value: {
+                      status: true,
+                      message: 'Dashboard stats retrieved',
+                      data: { category: 'campaign', activeCampaigns: 2, totalRaised: 125000, familiesReached: 340 },
+                    },
+                  },
+                },
+              },
             },
           },
           401: {
@@ -1444,11 +1465,18 @@ export const openApiDocument = {
             },
           },
           403: {
-            description: 'Organization not verified',
+            description: 'Not an organization account, or organization not verified',
             content: {
               'application/json': {
                 schema: { $ref: '#/components/schemas/ErrorResponse' },
                 examples: {
+                  NotAnOrganization: {
+                    value: {
+                      status: false,
+                      message: 'You do not have permission to perform this action',
+                      error: { code: ErrorCode.FORBIDDEN },
+                    },
+                  },
                   NotVerified: {
                     value: {
                       status: false,
@@ -1468,6 +1496,8 @@ export const openApiDocument = {
       get: {
         tags: ['Admin'],
         summary: 'List organizations (admin only)',
+        description:
+          'Paginated (Phase 16) — was previously an unbounded plain array; this is a breaking response-shape change (array → { data, meta }) for any existing consumer.',
         security: [{ bearerAuth: [] }],
         parameters: [
           {
@@ -1476,6 +1506,13 @@ export const openApiDocument = {
             required: false,
             schema: { type: 'string', enum: Object.values(VerificationStatus) },
             description: 'Filter by verificationStatus',
+          },
+          { name: 'page', in: 'query', required: false, schema: { type: 'integer', default: 1 } },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', default: 20, maximum: 50 },
           },
         ],
         responses: {
@@ -1613,6 +1650,7 @@ export const openApiDocument = {
       get: {
         tags: ['Admin'],
         summary: 'List campaigns (admin only)',
+        description: 'Paginated (Phase 16) — was previously an unbounded plain array.',
         security: [{ bearerAuth: [] }],
         parameters: [
           {
@@ -1622,12 +1660,19 @@ export const openApiDocument = {
             schema: { type: 'string', enum: Object.values(CampaignStatus), default: 'pending_approval' },
             description: 'Filter by status. Defaults to pending_approval.',
           },
+          { name: 'page', in: 'query', required: false, schema: { type: 'integer', default: 1 } },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', default: 20, maximum: 50 },
+          },
         ],
         responses: {
           200: {
             description: 'Campaigns retrieved',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/CampaignListRaw' } },
+              'application/json': { schema: { $ref: '#/components/schemas/AdminCampaignListResponse' } },
             },
           },
           401: {
@@ -1716,12 +1761,350 @@ export const openApiDocument = {
         },
       },
     },
+    '/v1/admin/orders/expire-stale': {
+      post: {
+        tags: ['Admin'],
+        summary: 'Manually trigger the order auto-expiry sweep (admin only)',
+        description:
+          'Calls the exact same OrderService.expireStaleOrders() the every-5-minutes cron job (node-cron, in-process) calls — for ops and for testing without waiting on a real clock. Cancels every order still paymentStatus: pending older than ORDER_EXPIRY_MINUTES (default 30), sets orderStatus: cancelled and cancellationReason: payment_expired, restores stock, and marks the related Transaction failed. Every order sharing a checkoutReference expires together. Safe to call repeatedly — idempotent, returns expiredCount: 0 when there is nothing left to expire.',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: {
+            description: 'Sweep completed',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ExpireStaleOrdersResponse' },
+                examples: {
+                  Expired: {
+                    value: {
+                      status: true,
+                      message: 'Stale orders expired',
+                      data: { expiredCount: 2 },
+                    },
+                  },
+                  NothingToExpire: {
+                    value: {
+                      status: true,
+                      message: 'Stale orders expired',
+                      data: { expiredCount: 0 },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          403: {
+            description: 'Not an admin',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/admin/users': {
+      get: {
+        tags: ['Admin'],
+        summary: 'List all platform users (admin only)',
+        description:
+          'Platform-wide user visibility — every account regardless of role or active status. `search` matches email/firstName/lastName/organizationName via case-insensitive regex.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'role',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', enum: Object.values(UserRole) },
+          },
+          { name: 'isActive', in: 'query', required: false, schema: { type: 'boolean' } },
+          { name: 'search', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'page', in: 'query', required: false, schema: { type: 'integer', default: 1 } },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', default: 20, maximum: 50 },
+          },
+        ],
+        responses: {
+          200: {
+            description: 'Users retrieved',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/AdminUserListResponse' } },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          403: {
+            description: 'Not an admin',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/admin/users/{id}/status': {
+      put: {
+        tags: ['Admin'],
+        summary: "Activate or deactivate a user's account (admin only)",
+        description:
+          'A status toggle on the existing `isActive` field — not a new status system. Deactivating a user only blocks their FUTURE login attempts (reuses the existing AuthService.login isActive check); it does NOT delete, hide, or alter their historical orders, campaigns, or products.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['isActive'],
+                properties: { isActive: { type: 'boolean' } },
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'User status updated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/UserSuccessResponse' } },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          403: {
+            description: 'Not an admin',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          404: {
+            description: 'User not found',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/admin/orders': {
+      get: {
+        tags: ['Admin'],
+        summary: 'List all platform orders across every buyer (admin only)',
+        description:
+          'Unlike GET /v1/orders (buyer-scoped) or the seller-incoming list, this has no buyer/seller restriction at all — every order on the platform. Single-order detail already works via the existing GET /v1/orders/{orderNumber} (admin is already permitted there since Phase 11); this is only the missing LIST endpoint.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'orderStatus',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', enum: Object.values(OrderStatus) },
+          },
+          {
+            name: 'paymentStatus',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', enum: ['pending', 'completed', 'failed'] },
+          },
+          { name: 'page', in: 'query', required: false, schema: { type: 'integer', default: 1 } },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', default: 20, maximum: 50 },
+          },
+        ],
+        responses: {
+          200: {
+            description: 'Orders retrieved',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/AdminOrderListResponse' } },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          403: {
+            description: 'Not an admin',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/admin/products': {
+      get: {
+        tags: ['Admin'],
+        summary: 'List all platform products, including unmoderated ones (admin only)',
+        description:
+          'Deliberately bypasses the isActive/deactivated-seller filtering that GET /v1/products applies for public browsing (Phase 11.5.3) — admin needs to see everything, including inactive products, products belonging to deactivated organizations, and products of any moderationStatus.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'isActive', in: 'query', required: false, schema: { type: 'boolean' } },
+          {
+            name: 'moderationStatus',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', enum: Object.values(ProductModerationStatus) },
+          },
+          { name: 'category', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'sellerId', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'page', in: 'query', required: false, schema: { type: 'integer', default: 1 } },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', default: 20, maximum: 50 },
+          },
+        ],
+        responses: {
+          200: {
+            description: 'Products retrieved',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AdminProductListResponse' },
+              },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          403: {
+            description: 'Not an admin',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/admin/products/{id}/moderate': {
+      put: {
+        tags: ['Admin'],
+        summary: 'Approve or reject a pending product listing (admin only)',
+        description:
+          'Same pattern as organization verification and campaign approval — rejectionReason is required when rejecting, and a product that has already been reviewed cannot be re-moderated (409). Sends a Brevo email to the seller either way.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['decision'],
+                properties: {
+                  decision: { type: 'string', enum: ['approved', 'rejected'], example: 'approved' },
+                  rejectionReason: {
+                    type: 'string',
+                    description: 'Required when decision is rejected.',
+                    example: 'Product images are unclear — please resubmit with clearer photos.',
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'Product moderated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ProductSuccessResponse' } },
+            },
+          },
+          400: {
+            description: 'rejectionReason missing when rejecting',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          403: {
+            description: 'Not an admin',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          404: {
+            description: 'Product not found',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          409: {
+            description: 'Product has already been reviewed',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/admin/dashboard': {
+      get: {
+        tags: ['Admin'],
+        summary: 'Platform-wide dashboard stats (admin only)',
+        description:
+          'Distinct from GET /v1/organizations/dashboard (Phase 13, per-organization, org-facing) — this is platform-wide across all users/orders/campaigns. `orders.revenue` is the sum of `subtotal` (never `total`) across `paymentStatus: completed` orders, same definition as Phase 13. `campaigns.totalDonated` sums `Campaign.currentFunding` across every campaign. `recentActivity` merges the last 10 orders and last 10 campaign submissions, sorted by createdAt descending, capped at 10 total. All independent aggregates run in parallel via Promise.all.',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: {
+            description: 'Dashboard stats retrieved',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AdminDashboardResponse' },
+              },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          403: {
+            description: 'Not an admin',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
     '/v1/products': {
       get: {
         tags: ['Products'],
         summary: 'List products (public)',
         description:
-          'Public marketplace listing. Always filters isActive: true and isApproved: true.',
+          'Public marketplace listing. Always filters isActive: true and moderationStatus: approved (Phase 19) — new listings default to pending and are invisible here until an admin approves them.',
         parameters: [
           { name: 'category', in: 'query', required: false, schema: { type: 'string' } },
           { name: 'state', in: 'query', required: false, schema: { type: 'string' } },
@@ -2406,12 +2789,52 @@ export const openApiDocument = {
         },
       },
     },
+    '/v1/users/donations': {
+      get: {
+        tags: ['Users'],
+        summary: "Get the caller's own donation history",
+        description:
+          'Any authenticated account can have donated (including an organization) — not restricted to role: user. Includes pending/failed attempts, not just completed ones, so status is always present on each item. relatedCampaign is populated one level deep (title + organization), with organization populated one further level for organizationName.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'status',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', enum: Object.values(PaymentStatus) },
+          },
+          { name: 'page', in: 'query', required: false, schema: { type: 'integer', default: 1 } },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', default: 20, maximum: 50 },
+          },
+        ],
+        responses: {
+          200: {
+            description: 'Donation history retrieved',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/DonationHistoryResponse' },
+              },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
     '/v1/orders/checkout': {
       post: {
         tags: ['Orders'],
         summary: 'Checkout the cart and start payment',
         description:
-          'Splits the cart into one Order per seller (linked by a shared checkoutReference), atomically reserves stock for every line, then initializes a single Paystack transaction for the combined total. The cart is NOT cleared here — only once the webhook confirms payment.',
+          'Splits the cart into one Order per seller (linked by a shared checkoutReference), atomically reserves stock for every line, then initializes a single Paystack transaction for the combined total. The cart is NOT cleared here — only once the webhook confirms payment. Note: unlike every other endpoint that returns an Order, this response\'s orders[].buyer/items[].seller are NOT populated (they\'re freshly created in the same request the caller just authenticated as, so populating adds no information) — fetch GET /v1/orders/{orderNumber} afterward for the populated shape.',
         security: [{ bearerAuth: [] }],
         requestBody: {
           required: true,
@@ -3183,9 +3606,19 @@ export const openApiDocument = {
       get: {
         tags: ['Campaigns'],
         summary: 'List sanitized donations for a campaign (owner only)',
-        description: 'Donor identity is reduced to name only — email/phone are never exposed to the org.',
+        description:
+          'Donor identity is reduced to name only — email/phone are never exposed to the org. Paginated (Phase 16) — a popular campaign\'s donation list has no upper bound, unlike e.g. delivery addresses.',
         security: [{ bearerAuth: [] }],
-        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'page', in: 'query', required: false, schema: { type: 'integer', default: 1 } },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', default: 20, maximum: 50 },
+          },
+        ],
         responses: {
           200: {
             description: 'Donations retrieved',
@@ -3307,6 +3740,13 @@ export const openApiDocument = {
             enum: Object.values(OrganizationType),
             example: OrganizationType.FARMER,
             nullable: true,
+          },
+          description: {
+            type: 'string',
+            nullable: true,
+            description:
+              'Organization "what we do" / mission statement, optional, set at onboarding time. Absent (not an empty string) for organizations onboarded before this field existed, and for individual (role: user) accounts.',
+            example: 'We distribute surplus fresh produce to underserved communities across Lagos.',
           },
           accountType: {
             type: 'string',
@@ -3497,6 +3937,13 @@ export const openApiDocument = {
             description: 'Organization contact phone number.',
             example: '+1987654321',
           },
+          description: {
+            type: 'string',
+            maxLength: 1000,
+            description:
+              'Optional — the organization\'s "what we do" / mission statement. Onboarding-time only for now; there is no edit-after-onboarding endpoint yet.',
+            example: 'We distribute surplus fresh produce to underserved communities across Lagos.',
+          },
           password: {
             type: 'string',
             format: 'password',
@@ -3676,7 +4123,15 @@ export const openApiDocument = {
           { $ref: '#/components/schemas/SuccessResponse' },
           {
             type: 'object',
-            properties: { data: { type: 'array', items: { $ref: '#/components/schemas/User' } } },
+            properties: {
+              data: {
+                type: 'object',
+                properties: {
+                  data: { type: 'array', items: { $ref: '#/components/schemas/User' } },
+                  meta: { $ref: '#/components/schemas/PaginationMeta' },
+                },
+              },
+            },
           },
         ],
       },
@@ -3760,7 +4215,18 @@ export const openApiDocument = {
           images: { type: 'array', items: { $ref: '#/components/schemas/ProductImage' } },
           location: { $ref: '#/components/schemas/ProductLocation' },
           isActive: { type: 'boolean', example: true },
-          isApproved: { type: 'boolean', example: true },
+          moderationStatus: {
+            type: 'string',
+            enum: Object.values(ProductModerationStatus),
+            example: ProductModerationStatus.PENDING,
+            description:
+              'New products default to pending — not auto-approved. Only approved products appear in public browse.',
+          },
+          rejectionReason: {
+            type: 'string',
+            nullable: true,
+            description: 'Only present when moderationStatus is rejected.',
+          },
           createdAt: { type: 'string', format: 'date-time' },
           updatedAt: { type: 'string', format: 'date-time' },
         },
@@ -3995,13 +4461,22 @@ export const openApiDocument = {
           },
         },
       },
+      OrderSellerRef: {
+        type: 'object',
+        description:
+          'items[].seller is always populated (Phase 17) — every Order belongs to exactly one seller (Phase 11\'s per-seller checkout split), so this is never a redundant top-level order.seller field, just the populated form of the existing reference.',
+        properties: {
+          _id: { type: 'string', example: '60d0fe4f54e0d9001c23a4b2' },
+          organizationName: { type: 'string', example: 'Acme Farms' },
+        },
+      },
       OrderItem: {
         type: 'object',
         description:
           'productName/unitPrice are snapshotted at checkout time — opposite of Cart, which stays live.',
         properties: {
-          product: { type: 'string' },
-          seller: { type: 'string' },
+          product: { type: 'string', description: 'Not populated — raw Product id.' },
+          seller: { $ref: '#/components/schemas/OrderSellerRef' },
           productName: { type: 'string', example: 'Fresh Tomatoes' },
           unitPrice: { type: 'number', example: 5000 },
           quantity: { type: 'integer', example: 2 },
@@ -4021,11 +4496,21 @@ export const openApiDocument = {
       },
       Order: {
         type: 'object',
+        description:
+          'buyer and items[].seller are always populated (Phase 17), on every endpoint that returns an Order — one consistent shape, not a special admin-only version.',
         properties: {
           _id: { type: 'string' },
           orderNumber: { type: 'string', example: 'ORD-20260812-3F2A9C' },
           checkoutReference: { type: 'string', example: 'CHF-1755000000000-a1b2c3d4' },
-          buyer: { type: 'string' },
+          buyer: {
+            type: 'object',
+            properties: {
+              _id: { type: 'string', example: '60d0fe4f54e0d9001c23a4a1' },
+              firstName: { type: 'string', example: 'Jane', nullable: true },
+              lastName: { type: 'string', example: 'Doe', nullable: true },
+              email: { type: 'string', format: 'email', example: 'jane@example.com' },
+            },
+          },
           items: { type: 'array', items: { $ref: '#/components/schemas/OrderItem' } },
           deliveryAddress: { $ref: '#/components/schemas/OrderDeliveryAddress' },
           deliveryMethod: { type: 'string', enum: Object.values(DeliveryMethod) },
@@ -4038,6 +4523,12 @@ export const openApiDocument = {
             example: 'pending',
           },
           orderStatus: { type: 'string', enum: Object.values(OrderStatus), example: 'pending' },
+          cancellationReason: {
+            type: 'string',
+            enum: Object.values(CancellationReason),
+            nullable: true,
+            description: 'Only present when orderStatus is cancelled.',
+          },
           deliveredAt: { type: 'string', format: 'date-time', nullable: true },
           proofOfDeliveryImages: {
             type: 'array',
@@ -4211,13 +4702,20 @@ export const openApiDocument = {
           },
         ],
       },
-      CampaignListRaw: {
-        description: 'Admin listing — plain array, no pagination, same shape as OrganizationListResponse.',
+      AdminCampaignListResponse: {
         allOf: [
           { $ref: '#/components/schemas/SuccessResponse' },
           {
             type: 'object',
-            properties: { data: { type: 'array', items: { $ref: '#/components/schemas/Campaign' } } },
+            properties: {
+              data: {
+                type: 'object',
+                properties: {
+                  campaigns: { type: 'array', items: { $ref: '#/components/schemas/Campaign' } },
+                  meta: { $ref: '#/components/schemas/PaginationMeta' },
+                },
+              },
+            },
           },
         ],
       },
@@ -4361,7 +4859,16 @@ export const openApiDocument = {
           {
             type: 'object',
             properties: {
-              data: { type: 'array', items: { $ref: '#/components/schemas/SanitizedDonation' } },
+              data: {
+                type: 'object',
+                properties: {
+                  donations: {
+                    type: 'array',
+                    items: { $ref: '#/components/schemas/SanitizedDonation' },
+                  },
+                  meta: { $ref: '#/components/schemas/PaginationMeta' },
+                },
+              },
             },
           },
         ],
@@ -4377,6 +4884,240 @@ export const openApiDocument = {
             example: 'Missing distribution plan detail',
           },
         },
+      },
+      SupplyDashboardStats: {
+        type: 'object',
+        properties: {
+          category: { type: 'string', enum: ['supply'] },
+          totalProducts: {
+            type: 'integer',
+            description: 'Count of this org\'s currently-active product listings.',
+            example: 12,
+          },
+          totalOrders: { type: 'integer', example: 34 },
+          revenue: {
+            type: 'number',
+            description:
+              'Sum of order.subtotal (NOT order.total) across paymentStatus: completed orders. Deliberately excludes deliveryFee.',
+            example: 450000,
+          },
+        },
+      },
+      CampaignDashboardStats: {
+        type: 'object',
+        properties: {
+          category: { type: 'string', enum: ['campaign'] },
+          activeCampaigns: { type: 'integer', example: 2 },
+          totalRaised: {
+            type: 'number',
+            description: 'Sum of Campaign.currentFunding across this org\'s campaigns.',
+            example: 125000,
+          },
+          familiesReached: {
+            type: 'integer',
+            description: 'Sum of beneficiaries across every distributionRecords entry on this org\'s campaigns.',
+            example: 340,
+          },
+        },
+      },
+      DashboardStatsResponse: {
+        allOf: [
+          { $ref: '#/components/schemas/SuccessResponse' },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                oneOf: [
+                  { $ref: '#/components/schemas/SupplyDashboardStats' },
+                  { $ref: '#/components/schemas/CampaignDashboardStats' },
+                ],
+                discriminator: { propertyName: 'category' },
+              },
+            },
+          },
+        ],
+      },
+      DonationCampaignRef: {
+        type: 'object',
+        description: 'relatedCampaign populated one level deep, organization one level further.',
+        properties: {
+          _id: { type: 'string' },
+          title: { type: 'string' },
+          organization: {
+            type: 'object',
+            properties: {
+              _id: { type: 'string' },
+              organizationName: { type: 'string', example: 'Hope Foundation' },
+            },
+          },
+        },
+      },
+      DonationTransaction: {
+        type: 'object',
+        properties: {
+          _id: { type: 'string' },
+          transactionReference: { type: 'string', example: 'CHF-DON-1755000000000-a1b2c3d4' },
+          amount: { type: 'number', example: 2500 },
+          transactionType: { type: 'string', enum: ['campaign_donation'] },
+          status: { type: 'string', enum: Object.values(PaymentStatus) },
+          relatedCampaign: { $ref: '#/components/schemas/DonationCampaignRef' },
+          createdAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      ExpireStaleOrdersResponse: {
+        allOf: [
+          { $ref: '#/components/schemas/SuccessResponse' },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'object',
+                properties: {
+                  expiredCount: { type: 'integer', example: 2 },
+                },
+              },
+            },
+          },
+        ],
+      },
+      AdminUserListResponse: {
+        allOf: [
+          { $ref: '#/components/schemas/SuccessResponse' },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'object',
+                properties: {
+                  users: { type: 'array', items: { $ref: '#/components/schemas/User' } },
+                  meta: { $ref: '#/components/schemas/PaginationMeta' },
+                },
+              },
+            },
+          },
+        ],
+      },
+      AdminOrderListResponse: {
+        allOf: [
+          { $ref: '#/components/schemas/SuccessResponse' },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'object',
+                properties: {
+                  orders: { type: 'array', items: { $ref: '#/components/schemas/Order' } },
+                  meta: { $ref: '#/components/schemas/PaginationMeta' },
+                },
+              },
+            },
+          },
+        ],
+      },
+      AdminProductListResponse: {
+        allOf: [
+          { $ref: '#/components/schemas/SuccessResponse' },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'object',
+                properties: {
+                  products: { type: 'array', items: { $ref: '#/components/schemas/Product' } },
+                  meta: { $ref: '#/components/schemas/PaginationMeta' },
+                },
+              },
+            },
+          },
+        ],
+      },
+      AdminDashboardResponse: {
+        allOf: [
+          { $ref: '#/components/schemas/SuccessResponse' },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'object',
+                properties: {
+                  users: {
+                    type: 'object',
+                    properties: {
+                      total: { type: 'integer', example: 214 },
+                      byRole: {
+                        type: 'object',
+                        description: 'Keyed by UserRole — only roles with at least one user appear.',
+                        example: { user: 180, organization: 30, admin: 3, fso: 1 },
+                      },
+                    },
+                  },
+                  orders: {
+                    type: 'object',
+                    properties: {
+                      total: { type: 'integer', example: 512, description: 'Count of ALL orders, any status.' },
+                      revenue: {
+                        type: 'number',
+                        example: 4250000,
+                        description:
+                          'Sum of subtotal (never total/deliveryFee) across paymentStatus: completed orders only — same definition as GET /v1/organizations/dashboard.',
+                      },
+                    },
+                  },
+                  campaigns: {
+                    type: 'object',
+                    properties: {
+                      active: { type: 'integer', example: 12 },
+                      totalDonated: {
+                        type: 'number',
+                        example: 980000,
+                        description: 'Sum of Campaign.currentFunding across every campaign on the platform.',
+                      },
+                    },
+                  },
+                  pendingVerifications: {
+                    type: 'integer',
+                    example: 7,
+                    description: 'Organizations with verificationStatus in pending or under_review.',
+                  },
+                  recentActivity: {
+                    type: 'array',
+                    description:
+                      'Last 10 orders + campaign submissions combined, sorted by createdAt descending.',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        type: { type: 'string', enum: ['order', 'campaign'] },
+                        id: { type: 'string' },
+                        summary: { type: 'string', example: 'Order ORD-20260814-3F2A9C — ₦11,500 (pending)' },
+                        createdAt: { type: 'string', format: 'date-time' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
+      DonationHistoryResponse: {
+        allOf: [
+          { $ref: '#/components/schemas/SuccessResponse' },
+          {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'object',
+                properties: {
+                  donations: {
+                    type: 'array',
+                    items: { $ref: '#/components/schemas/DonationTransaction' },
+                  },
+                  meta: { $ref: '#/components/schemas/PaginationMeta' },
+                },
+              },
+            },
+          },
+        ],
       },
     },
   },

@@ -2,6 +2,7 @@ import { Response } from 'express';
 
 import { campaignService } from '../services/service-container';
 import { sendSuccess } from '../utils/api-response';
+import { buildPaginationMeta, parsePagination } from '../utils/pagination';
 import { AuthRequest } from '../types/auth.types';
 
 export class CampaignController {
@@ -100,8 +101,15 @@ export class CampaignController {
   };
 
   getDonations = async (req: AuthRequest, res: Response): Promise<Response> => {
-    const donations = await campaignService.getDonations(req.params.id, req.user!.id);
-    return sendSuccess(res, 200, 'Donations retrieved', donations);
+    const { page, limit } = parsePagination(req.query);
+    const { items, total } = await campaignService.getDonations(req.params.id, req.user!.id, {
+      page,
+      limit,
+    });
+    return sendSuccess(res, 200, 'Donations retrieved', {
+      donations: items,
+      meta: buildPaginationMeta(page, limit, total),
+    });
   };
 
   donate = async (req: AuthRequest, res: Response): Promise<Response> => {

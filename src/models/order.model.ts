@@ -1,6 +1,6 @@
 import { Document, Schema, Types, model } from 'mongoose';
 
-import { DeliveryMethod, OrderStatus, PaymentStatus } from '../types/enums';
+import { CancellationReason, DeliveryMethod, OrderStatus, PaymentStatus } from '../types/enums';
 
 // Deliberately the opposite snapshot rule from Cart (which stays live): an Order is a
 // historical receipt, so productName/unitPrice are frozen at checkout time. If the seller
@@ -45,6 +45,9 @@ export interface IOrder extends Document {
   // Denormalized from Transaction for fast reads without a join.
   paymentStatus: PaymentStatus;
   orderStatus: OrderStatus;
+  // Only ever set when orderStatus becomes cancelled — metadata about why, not a second
+  // status field (see CancellationReason).
+  cancellationReason?: CancellationReason;
   deliveredAt?: Date;
   proofOfDeliveryImages: IOrderProofImage[];
   createdAt: Date;
@@ -110,6 +113,7 @@ const orderSchema = new Schema<IOrder>(
       enum: Object.values(OrderStatus),
       default: OrderStatus.PENDING,
     },
+    cancellationReason: { type: String, enum: Object.values(CancellationReason) },
     deliveredAt: { type: Date },
     // Not yet populated by any endpoint in Phase 11 — the field/shape exists so the
     // fulfillment-photo upload endpoint has somewhere to write to when it's built.

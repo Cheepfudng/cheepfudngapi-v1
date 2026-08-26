@@ -28,6 +28,8 @@ import { CampaignRepository } from '../repositories/campaign.repository';
 import { CampaignFundRepository } from '../repositories/campaign-fund.repository';
 import { CampaignFundService } from './campaign-fund.service';
 import { CampaignService } from './campaign.service';
+import { OrganizationService } from './organization.service';
+import { DonationService } from './donation.service';
 
 export const refreshTokenStore = new RedisRefreshTokenStore();
 export const tokenBlacklistStore = new RedisTokenBlacklistStore();
@@ -49,11 +51,16 @@ export const campaignFundService = new CampaignFundService(
   campaignRepository
 );
 
+export const productRepository = new ProductRepository();
+export const orderRepository = new OrderRepository();
+
 export const adminService = new AdminService(
   userRepository,
   verificationDocumentRepository,
   emailProvider,
-  campaignRepository
+  campaignRepository,
+  productRepository,
+  orderRepository
 );
 export const documentService = new DocumentService(
   userRepository,
@@ -68,7 +75,6 @@ export const passwordService = new PasswordService(
   authService
 );
 
-export const productRepository = new ProductRepository();
 export const productService = new ProductService(
   productRepository,
   userRepository,
@@ -83,7 +89,6 @@ export const userService = new UserService(userRepository);
 export const paymentGateway = new PaystackGateway();
 export const transactionRepository = new TransactionRepository();
 export const webhookLogRepository = new WebhookLogRepository();
-export const orderRepository = new OrderRepository();
 
 export const paymentService = new PaymentService(
   paymentGateway,
@@ -105,7 +110,8 @@ export const orderService = new OrderService(
   productRepository,
   userRepository,
   paymentService,
-  checkoutLock
+  checkoutLock,
+  transactionRepository
 );
 
 export const campaignService = new CampaignService(
@@ -115,3 +121,11 @@ export const campaignService = new CampaignService(
   documentStorage,
   paymentService
 );
+
+export const organizationService = new OrganizationService(
+  productRepository,
+  orderRepository,
+  campaignRepository
+);
+
+export const donationService = new DonationService(transactionRepository);

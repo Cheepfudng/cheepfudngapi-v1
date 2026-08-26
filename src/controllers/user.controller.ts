@@ -1,8 +1,10 @@
 import { Response } from 'express';
 
-import { userService } from '../services/service-container';
+import { donationService, userService } from '../services/service-container';
 import { sendSuccess } from '../utils/api-response';
+import { buildPaginationMeta, parsePagination } from '../utils/pagination';
 import { AuthRequest } from '../types/auth.types';
+import { PaymentStatus } from '../types/enums';
 
 export class UserController {
   listAddresses = async (req: AuthRequest, res: Response): Promise<Response> => {
@@ -42,6 +44,21 @@ export class UserController {
   setDefaultAddress = async (req: AuthRequest, res: Response): Promise<Response> => {
     const addresses = await userService.setDefaultAddress(req.user!.id, req.params.addressId);
     return sendSuccess(res, 200, 'Default delivery address updated', addresses);
+  };
+
+  listDonations = async (req: AuthRequest, res: Response): Promise<Response> => {
+    const { page, limit } = parsePagination(req.query);
+    const status = req.query.status as PaymentStatus | undefined;
+
+    const { items, total } = await donationService.getDonationHistory(req.user!.id, status, {
+      page,
+      limit,
+    });
+
+    return sendSuccess(res, 200, 'Donation history retrieved', {
+      donations: items,
+      meta: buildPaginationMeta(page, limit, total),
+    });
   };
 }
 

@@ -111,7 +111,14 @@ export class DocumentService {
     if (!user) throw new AppError('User not found', 404, ErrorCode.USER_NOT_FOUND);
 
     const documents = await this.documentRepository.findByUser(userId);
-    return { verificationStatus: user.verificationStatus, documents };
+    // Explicitly included — this builds a custom response shape (not the full user
+    // document), so unlike Phase 18's description field, rejectionReason does NOT flow
+    // through here automatically and must be added by hand.
+    return {
+      verificationStatus: user.verificationStatus,
+      rejectionReason: user.rejectionReason,
+      documents,
+    };
   }
 
   // Lets the frontend know exactly what to ask for, before the user starts uploading

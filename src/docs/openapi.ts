@@ -1579,6 +1579,8 @@ export const openApiDocument = {
       put: {
         tags: ['Admin'],
         summary: 'Approve or reject an organization (admin only)',
+        description:
+          'Not single-use — this can be called at any time regardless of the organization\'s current verificationStatus, to let admin correct a prior mistake in either direction (verified → rejected or vice versa). This is a deliberate admin-override capability, distinct from the org\'s own resubmission flow (which does not exist). The same notification email fires on every call, including corrections. rejectionReason is persisted on the User document (not just emailed) and is retrievable via GET /v1/organizations/verification-status (org\'s own view) and GET /v1/admin/organizations/{id} (admin\'s view); it is explicitly cleared back to null whenever the decision becomes approved.',
         security: [{ bearerAuth: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
         requestBody: {
@@ -1633,12 +1635,6 @@ export const openApiDocument = {
           },
           404: {
             description: 'Organization not found',
-            content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
-            },
-          },
-          409: {
-            description: 'Already verified',
             content: {
               'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
             },
@@ -3762,6 +3758,13 @@ export const openApiDocument = {
               'For role: organization, this reflects admin document-review status (pending → under_review → verified/rejected). For role: user, it is set to verified immediately upon completing onboarding.',
             example: VerificationStatus.VERIFIED,
           },
+          rejectionReason: {
+            type: 'string',
+            nullable: true,
+            description:
+              'Set only when verificationStatus is rejected. Explicitly cleared back to null if the organization is later approved after a prior rejection — never left stale from an old decision.',
+            example: 'Submitted business registration document is expired.',
+          },
           onboardingStatus: {
             type: 'string',
             enum: Object.values(OnboardingStatus),
@@ -4089,6 +4092,13 @@ export const openApiDocument = {
                 type: 'object',
                 properties: {
                   verificationStatus: { type: 'string', enum: Object.values(VerificationStatus) },
+                  rejectionReason: {
+                    type: 'string',
+                    nullable: true,
+                    description:
+                      'Present only when verificationStatus is rejected. Absent/null once a prior rejection has been superseded by approval.',
+                    example: 'Submitted business registration document is expired.',
+                  },
                   documents: {
                     type: 'array',
                     items: { $ref: '#/components/schemas/VerificationDocument' },

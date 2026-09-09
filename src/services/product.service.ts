@@ -4,7 +4,7 @@ import { AppError } from '../errors/app-error';
 import { ErrorCode } from '../errors/error-codes';
 import { DocumentStorage } from '../integrations/contracts/document-storage.interface';
 import { IProduct } from '../models/product.model';
-import { ProductRepository } from '../repositories/product.repository';
+import { PUBLIC_SELLER_FIELDS, ProductRepository } from '../repositories/product.repository';
 import { UserRepository } from '../repositories/user.repository';
 import { OrganizationType, ProductModerationStatus, UserRole, VerificationStatus } from '../types/enums';
 import { buildPaginationMeta, parsePagination } from '../utils/pagination';
@@ -108,14 +108,18 @@ export class ProductService {
       throw new AppError('Product not found', 404, ErrorCode.PRODUCT_NOT_FOUND);
     }
 
-    await product.populate('seller');
-
     // A deactivated organization's listings must disappear from public view — indistinguishable
     // from the product itself not existing, same as the isActive/moderationStatus check above.
-    const seller = product.seller as unknown as { isActive?: boolean };
-    if (seller?.isActive === false) {
+    // Checked via a direct lookup rather than reading it off the populated seller below,
+    // since that populate is deliberately restricted to PUBLIC_SELLER_FIELDS (no isActive)
+    // — this endpoint is unauthenticated and public, so the response must never carry more
+    // than the badge-only fields the list endpoint already restricts itself to.
+    const seller = await this.userRepository.findById(product.seller.toString());
+    if (!seller || seller.isActive === false) {
       throw new AppError('Product not found', 404, ErrorCode.PRODUCT_NOT_FOUND);
     }
+
+    await product.populate('seller', PUBLIC_SELLER_FIELDS);
 
     return product;
   }

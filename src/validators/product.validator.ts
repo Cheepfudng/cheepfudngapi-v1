@@ -1,4 +1,8 @@
-import { body, query } from 'express-validator';
+import { body, param, query } from 'express-validator';
+
+export const productIdParamValidation = [
+  param('id').isMongoId().withMessage('id must be a valid id'),
+];
 
 export const listProductsValidation = [
   query('category').optional().trim().notEmpty().withMessage('category cannot be empty'),

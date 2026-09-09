@@ -42,6 +42,10 @@ export interface IUser extends Document {
   accountType?: AccountType;
   role: UserRole;
   verificationStatus: VerificationStatus;
+  // Set only when verificationStatus is rejected — same pattern as Product.rejectionReason
+  // (Phase 19). Explicitly cleared (set to null) if the org is later approved after a
+  // prior rejection, so a stale reason never lingers past its relevance.
+  rejectionReason?: string | null;
   onboardingStatus: OnboardingStatus;
 
   isEmailVerified: boolean;
@@ -96,6 +100,7 @@ const userSchema = new Schema<IUser>(
       enum: Object.values(VerificationStatus),
       default: VerificationStatus.PENDING,
     },
+    rejectionReason: { type: String, trim: true },
 
     onboardingStatus: {
       type: String,

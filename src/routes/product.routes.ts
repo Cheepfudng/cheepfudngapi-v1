@@ -11,6 +11,7 @@ import { validateRequest } from '../middleware/validation.middleware';
 import {
   createProductValidation,
   listProductsValidation,
+  productIdParamValidation,
   updateProductValidation,
 } from '../validators/product.validator';
 import { asyncHandler } from '../utils/async-handler';
@@ -18,7 +19,12 @@ import { asyncHandler } from '../utils/async-handler';
 const router = Router();
 
 router.get('/', listProductsValidation, validateRequest, asyncHandler(productController.list));
-router.get('/:id', asyncHandler(productController.getById));
+router.get(
+  '/:id',
+  productIdParamValidation,
+  validateRequest,
+  asyncHandler(productController.getById)
+);
 
 router.post(
   '/',
@@ -34,11 +40,18 @@ router.post(
 router.put(
   '/:id',
   asyncHandler(protect),
+  productIdParamValidation,
   updateProductValidation,
   validateRequest,
   asyncHandler(productController.update)
 );
 
-router.delete('/:id', asyncHandler(protect), asyncHandler(productController.remove));
+router.delete(
+  '/:id',
+  asyncHandler(protect),
+  productIdParamValidation,
+  validateRequest,
+  asyncHandler(productController.remove)
+);
 
 export default router;

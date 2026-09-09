@@ -87,10 +87,12 @@ export class AdminService {
       throw new AppError('Organization not found', 404, ErrorCode.USER_NOT_FOUND);
     }
 
-    if (user.verificationStatus === VerificationStatus.VERIFIED) {
-      throw new AppError('Organization is already verified', 409, ErrorCode.CONFLICT);
-    }
-
+    // Deliberately no "already verified"/"already reviewed" guard here — admin can change
+    // a verification decision at any time, regardless of the org's current
+    // verificationStatus (an admin-override capability, distinct from — and not a
+    // replacement for — the org's own resubmission flow, which still doesn't exist).
+    // Unlike Products/Campaigns, which block re-review by design, Organizations
+    // intentionally allows correcting a prior mistake in either direction.
     if (decision === 'rejected' && !rejectionReason) {
       throw new AppError(
         'rejectionReason is required when rejecting',
@@ -101,7 +103,13 @@ export class AdminService {
 
     const newStatus =
       decision === 'approved' ? VerificationStatus.VERIFIED : VerificationStatus.REJECTED;
-    const updated = await this.userRepository.updateById(orgId, { verificationStatus: newStatus });
+    const updated = await this.userRepository.updateById(orgId, {
+      verificationStatus: newStatus,
+      // Explicit null (not undefined) on approval — clears a stale reason from a prior
+      // rejection now that the org has been approved. Undefined is ambiguous across
+      // Mongo driver versions for update payloads; null unambiguously sets the field.
+      rejectionReason: decision === 'rejected' ? rejectionReason : null,
+    });
 
     await this.emailProvider.sendEmail({
       to: user.email,

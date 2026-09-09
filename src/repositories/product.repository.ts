@@ -22,7 +22,12 @@ export interface AdminProductFilter {
   sellerId?: string;
 }
 
-const PUBLIC_SELLER_FIELDS = 'organizationName organizationType verificationStatus';
+// Exported and reused wherever a product's seller is populated for any public-facing
+// response (list AND detail) — never populate seller without this, and never write a
+// second, separately-maintained field list that could drift out of sync (this exact
+// mistake — findMany got it right, getProductById didn't — is what caused a live PII
+// leak, see PROJECT_STATE.md).
+export const PUBLIC_SELLER_FIELDS = 'organizationName organizationType verificationStatus';
 
 export class ProductRepository {
   async create(data: Partial<IProduct>): Promise<IProduct> {

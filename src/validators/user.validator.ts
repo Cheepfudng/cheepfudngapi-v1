@@ -2,9 +2,7 @@ import { body, param, query } from 'express-validator';
 
 import { PaymentStatus } from '../types/enums';
 import { NIGERIAN_STATES } from '../utils/constants';
-
-// Reuses the same Nigerian phone pattern as onboarding.validator.ts.
-const NIGERIAN_PHONE_REGEX = /^\+?[1-9]\d{7,14}$/;
+import { phoneValidationRule } from './common.validator';
 
 export const addressIdParamValidation = [
   param('addressId').isMongoId().withMessage('addressId must be a valid id'),
@@ -15,10 +13,7 @@ export const createAddressValidation = [
   body('street').trim().notEmpty().withMessage('street is required'),
   body('city').trim().notEmpty().withMessage('city is required'),
   body('state').isIn(NIGERIAN_STATES).withMessage('state must be a valid Nigerian state'),
-  body('phone')
-    .trim()
-    .matches(NIGERIAN_PHONE_REGEX)
-    .withMessage('A valid phone number is required'),
+  phoneValidationRule('phone'),
 ];
 
 // isDefault is deliberately not a validated/accepted field here — see UserService.updateAddress.
@@ -31,11 +26,7 @@ export const updateAddressValidation = [
     .optional()
     .isIn(NIGERIAN_STATES)
     .withMessage('state must be a valid Nigerian state'),
-  body('phone')
-    .optional()
-    .trim()
-    .matches(NIGERIAN_PHONE_REGEX)
-    .withMessage('A valid phone number is required'),
+  phoneValidationRule('phone', { optional: true }),
 ];
 
 export const listDonationsValidation = [

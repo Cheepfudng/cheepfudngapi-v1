@@ -131,6 +131,19 @@ export class OrderService {
                 ErrorCode.VALIDATION_ERROR
               );
             }
+            // Cart is only guaranteed to enforce minimumOrder at the moment an item is
+            // first added (CartService.addItem) — PUT /cart/update and PATCH
+            // /cart/increment both intentionally allow reducing an existing line below it
+            // afterward (a documented decision, see PROJECT_STATE.md), so a cart line below
+            // its product's minimum can genuinely reach checkout. Re-checked here as the
+            // final gate before it becomes a real, paid order.
+            if (item.quantity < product.minimumOrder) {
+              throw new AppError(
+                `${product.name} has a minimum order of ${product.minimumOrder} — please update your cart`,
+                400,
+                ErrorCode.VALIDATION_ERROR
+              );
+            }
             resolvedItems.push({ product, quantity: item.quantity });
           }
 

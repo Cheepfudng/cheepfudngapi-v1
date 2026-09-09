@@ -623,7 +623,7 @@ export const openApiDocument = {
                     email: 'test@example.com',
                     firstName: 'John',
                     lastName: 'Doe',
-                    phoneNumber: '+1234567890',
+                    phoneNumber: '08012345678',
                     password: 'StrongPass123',
                     confirmPassword: 'StrongPass123',
                   },
@@ -650,7 +650,7 @@ export const openApiDocument = {
                         email: 'test@example.com',
                         firstName: 'John',
                         lastName: 'Doe',
-                        phoneNumber: '+1234567890',
+                        phoneNumber: '+2348012345678',
                         accountType: AccountType.INDIVIDUAL,
                         role: UserRole.USER,
                         verificationStatus: VerificationStatus.VERIFIED,
@@ -821,7 +821,7 @@ export const openApiDocument = {
                     email: 'org@example.com',
                     organizationName: 'Acme Farms',
                     organizationType: 'Farmer/Vendor',
-                    phoneNumber: '+1987654321',
+                    phoneNumber: '08087654321',
                     password: 'StrongPass123',
                     confirmPassword: 'StrongPass123',
                   },
@@ -848,7 +848,7 @@ export const openApiDocument = {
                         email: 'org@example.com',
                         organizationName: 'Acme Farms',
                         organizationType: 'Farmer/Vendor',
-                        phoneNumber: '+1987654321',
+                        phoneNumber: '+2348087654321',
                         accountType: AccountType.ORGANIZATION,
                         role: UserRole.ORGANIZATION,
                         verificationStatus: VerificationStatus.PENDING,
@@ -2472,7 +2472,7 @@ export const openApiDocument = {
         tags: ['Cart'],
         summary: 'Set an item to an exact quantity',
         description:
-          'quantity: 0 removes the item, same as DELETE /v1/cart/{productId}. Otherwise enforces the same quantityAvailable stock-cap as /cart/add (minimumOrder is not re-enforced here, so an existing line can always be reduced). 404 if the product is not currently in the cart.',
+          'quantity: 0 removes the item, same as DELETE /v1/cart/{productId}. Otherwise enforces both the quantityAvailable stock-cap and the product minimumOrder floor as /cart/add does — a quantity below minimumOrder is rejected with 400 VALIDATION_ERROR, since an explicit PUT is treated as a mistake to correct, not an intent to remove (contrast with PATCH /cart/increment, where decrementing below the minimum removes the line instead). 404 if the product is not currently in the cart.',
         security: [{ bearerAuth: [] }],
         requestBody: {
           required: true,
@@ -2494,9 +2494,20 @@ export const openApiDocument = {
             },
           },
           400: {
-            description: 'Validation error (e.g. exceeds quantityAvailable)',
+            description: 'Validation error (below minimumOrder, or exceeds quantityAvailable)',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+                examples: {
+                  BelowMinimumOrder: {
+                    value: {
+                      status: false,
+                      message: 'Minimum order for this product is 300',
+                      error: { code: ErrorCode.VALIDATION_ERROR },
+                    },
+                  },
+                },
+              },
             },
           },
           401: {
@@ -2530,7 +2541,7 @@ export const openApiDocument = {
         tags: ['Cart'],
         summary: 'Increment or decrement an existing item by exactly 1 (stepper UI)',
         description:
-          "For the +/- stepper on an item already in the cart. POST /v1/cart/add remains the entry point for adding a new quantity from a product page — this endpoint only accepts delta: 1 or -1, not a general 'add N'. Applied as an atomic MongoDB increment so two rapid-fire calls can never lose an update the way a naive read-then-write would. delta: -1 on a quantity-1 item removes it, same as setting quantity: 0 via PUT /cart/update. Returns the full cart shape (same as GET /v1/cart) so the UI can update its stepper directly from the response.",
+          "For the +/- stepper on an item already in the cart. POST /v1/cart/add remains the entry point for adding a new quantity from a product page — this endpoint only accepts delta: 1 or -1, not a general 'add N'. Applied as an atomic MongoDB increment so two rapid-fire calls can never lose an update the way a naive read-then-write would. delta: -1 that would take the line to 0 or below the product's minimumOrder removes it entirely (crossing below the seller's minimum via a decrement is treated as \"I don't want this small an amount,\" not a mistake to reject — contrast with PUT /cart/update, which rejects an explicit below-minimum quantity instead of removing it). Returns the full cart shape (same as GET /v1/cart) so the UI can update its stepper directly from the response.",
         security: [{ bearerAuth: [] }],
         requestBody: {
           required: true,
@@ -3886,9 +3897,10 @@ export const openApiDocument = {
           },
           phoneNumber: {
             type: 'string',
-            pattern: '^\\+?[1-9]\\d{7,14}$',
-            description: "User's phone number.",
-            example: '+1234567890',
+            pattern: '^(?:\\+?234|0)?[789]\\d{9}$',
+            description:
+              "User's Nigerian phone number. Accepts local (0XXXXXXXXXX), +234XXXXXXXXXX, 234XXXXXXXXXX, or bare 10-digit (XXXXXXXXXX) formats — normalized to +234XXXXXXXXXX before storage regardless of which was submitted.",
+            example: '08012345678',
           },
           password: {
             type: 'string',
@@ -3936,9 +3948,10 @@ export const openApiDocument = {
           },
           phoneNumber: {
             type: 'string',
-            pattern: '^\\+?[1-9]\\d{7,14}$',
-            description: 'Organization contact phone number.',
-            example: '+1987654321',
+            pattern: '^(?:\\+?234|0)?[789]\\d{9}$',
+            description:
+              "Organization contact phone number. Accepts local (0XXXXXXXXXX), +234XXXXXXXXXX, 234XXXXXXXXXX, or bare 10-digit (XXXXXXXXXX) formats — normalized to +234XXXXXXXXXX before storage regardless of which was submitted.",
+            example: '08087654321',
           },
           description: {
             type: 'string',
@@ -4367,6 +4380,12 @@ export const openApiDocument = {
           name: { type: 'string', example: 'Fresh Tomatoes' },
           price: { type: 'number', example: 5000 },
           unit: { type: 'string', example: 'crate' },
+          minimumOrder: {
+            type: 'integer',
+            example: 2,
+            description:
+              'The floor enforced on first add to cart and on PUT /v1/cart/update; the client needs this to build its own stepper/quantity-input validation.',
+          },
           image: { type: 'string', format: 'uri', nullable: true },
           seller: {
             type: 'object',
@@ -4444,7 +4463,13 @@ export const openApiDocument = {
           street: { type: 'string', example: '12 Allen Avenue' },
           city: { type: 'string', example: 'Ikeja' },
           state: { type: 'string', enum: NIGERIAN_STATES, example: 'Lagos' },
-          phone: { type: 'string', example: '+2348012345678' },
+          phone: {
+            type: 'string',
+            pattern: '^(?:\\+?234|0)?[789]\\d{9}$',
+            description:
+              'Accepts local (0XXXXXXXXXX), +234XXXXXXXXXX, 234XXXXXXXXXX, or bare 10-digit (XXXXXXXXXX) formats — normalized to +234XXXXXXXXXX before storage regardless of which was submitted.',
+            example: '08012345678',
+          },
         },
       },
       UpdateAddressRequest: {
@@ -4456,7 +4481,13 @@ export const openApiDocument = {
           street: { type: 'string', example: '5 Adeola Odeku Street' },
           city: { type: 'string', example: 'Victoria Island' },
           state: { type: 'string', enum: NIGERIAN_STATES, example: 'Lagos' },
-          phone: { type: 'string', example: '+2348012345678' },
+          phone: {
+            type: 'string',
+            pattern: '^(?:\\+?234|0)?[789]\\d{9}$',
+            description:
+              'Accepts local (0XXXXXXXXXX), +234XXXXXXXXXX, 234XXXXXXXXXX, or bare 10-digit (XXXXXXXXXX) formats — normalized to +234XXXXXXXXXX before storage regardless of which was submitted.',
+            example: '08012345678',
+          },
         },
       },
       CheckoutRequest: {

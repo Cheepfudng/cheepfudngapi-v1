@@ -15,6 +15,7 @@ export interface CartItemView {
     name: string;
     price: number;
     unit: string;
+    minimumOrder: number;
     image: string | null;
     seller: { organizationName?: string } | null;
   } | null;
@@ -33,13 +34,16 @@ const EMPTY_CART_VIEW: CartView = { items: [], subtotal: 0, totalItems: 0 };
 
 const CART_PRODUCT_POPULATE = {
   path: 'items.product',
-  select: 'name price unit images isActive moderationStatus seller',
+  select: 'name price unit minimumOrder images isActive moderationStatus seller',
   populate: { path: 'seller', select: 'organizationName' },
 };
 
 interface PopulatedCartItem {
   product:
-    | (Pick<IProduct, 'name' | 'price' | 'unit' | 'images' | 'isActive' | 'moderationStatus'> & {
+    | (Pick<
+        IProduct,
+        'name' | 'price' | 'unit' | 'minimumOrder' | 'images' | 'isActive' | 'moderationStatus'
+      > & {
         _id: Types.ObjectId;
         seller?: Pick<IUser, 'organizationName'>;
       })
@@ -90,9 +94,12 @@ export class CartService {
     return this.populateAndBuildView(updated);
   }
 
-  // quantity: 0 removes the item, same as removeItem(). Only enforces the quantityAvailable
-  // ceiling ("same stock-cap validation as 9.3") — minimumOrder is a first-add floor, not
-  // re-enforced here, so a buyer can freely reduce an existing line without hitting it.
+  // quantity: 0 removes the item, same as removeItem() (an explicit "remove" intent, not an
+  // invalid-quantity mistake, so it bypasses the minimumOrder floor below). Any other
+  // quantity is now re-checked against both the quantityAvailable ceiling and the
+  // minimumOrder floor (added — a decision to reject rather than silently truncate/remove,
+  // since PUT is an explicit "set to exactly this" action: an invalid explicit quantity is
+  // a mistake to correct, not an intent to remove).
   async setItemQuantity(userId: string, productId: string, quantity: number): Promise<CartView> {
     if (quantity < 0) {
       throw new AppError('quantity cannot be negative', 400, ErrorCode.VALIDATION_ERROR);
@@ -131,6 +138,19 @@ export class CartService {
 
     try {
       const product = await this.getPurchasableProduct(productId);
+
+      // A decrement (never an increment — see the delta === -1 guard) that lands strictly
+      // below minimumOrder isn't a mistake to reject the way an explicit PUT would be: it's
+      // the buyer signaling "I don't want this small an amount" via the stepper, which is
+      // functionally the same intent as decrementing all the way to 0. Remove the line
+      // entirely rather than leaving it sitting at an invalid quantity. Returning here (not
+      // throwing) means the $inc that already landed is superseded by the removal, not
+      // rolled back — there's nothing left to roll back once the line is gone.
+      if (delta === -1 && newQuantity < product.minimumOrder) {
+        const updated = await this.cartRepository.removeItem(userId, productId);
+        return this.populateAndBuildView(updated ?? incremented);
+      }
+
       if (newQuantity > product.quantityAvailable) {
         throw new AppError(
           `Only ${product.quantityAvailable} ${product.unit}(s) available`,
@@ -147,8 +167,9 @@ export class CartService {
     return this.populateAndBuildView(incremented);
   }
 
-  // Shared by setItemQuantity (PUT /cart/update) and adjustQuantity (PATCH /cart/increment,
-  // via the atomic-increment path above): same ceiling check, same <= 0 -> removal rule.
+  // Only called by setItemQuantity (PUT /cart/update) — adjustQuantity (PATCH
+  // /cart/increment) has its own separate atomic-$inc-based implementation below and does
+  // NOT go through this method, despite the two conceptually sharing similar rules.
   private async applyQuantity(
     userId: string,
     productId: string,
@@ -159,6 +180,15 @@ export class CartService {
     }
 
     const product = await this.getPurchasableProduct(productId);
+
+    if (quantity < product.minimumOrder) {
+      throw new AppError(
+        `Minimum order for this product is ${product.minimumOrder}`,
+        400,
+        ErrorCode.VALIDATION_ERROR
+      );
+    }
+
     if (quantity > product.quantityAvailable) {
       throw new AppError(
         `Only ${product.quantityAvailable} ${product.unit}(s) available`,
@@ -225,6 +255,7 @@ export class CartService {
               name: product.name,
               price: product.price,
               unit: product.unit,
+              minimumOrder: product.minimumOrder,
               image: product.images?.[0]?.url ?? null,
               seller: product.seller ?? null,
             }

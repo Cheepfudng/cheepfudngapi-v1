@@ -1,7 +1,7 @@
 import { body } from 'express-validator';
 
 import { AccountType, OrganizationType } from '../types/enums';
-import { passwordRules } from './common.validator';
+import { passwordRules, phoneValidationRule } from './common.validator';
 
 export const requestOtpValidation = [
   body('email').isEmail().withMessage('A valid email is required').normalizeEmail(),
@@ -26,10 +26,7 @@ export const individualOnboardingValidation = [
 
   body('lastName').trim().notEmpty().withMessage('Last name is required'),
 
-  body('phoneNumber')
-    .trim()
-    .matches(/^\+?[1-9]\d{7,14}$/)
-    .withMessage('A valid phone number is required'),
+  phoneValidationRule('phoneNumber'),
 
   ...passwordRules,
 ];
@@ -43,10 +40,7 @@ export const organizationOnboardingValidation = [
     .isIn(Object.values(OrganizationType))
     .withMessage('Invalid organization type'),
 
-  body('phoneNumber')
-    .trim()
-    .matches(/^\+?[1-9]\d{7,14}$/)
-    .withMessage('A valid phone number is required'),
+  phoneValidationRule('phoneNumber'),
 
   body('description')
     .optional({ values: 'falsy' })

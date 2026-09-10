@@ -27,6 +27,7 @@ import { RedisLock } from '../integrations/redis/redis.lock';
 import { CampaignRepository } from '../repositories/campaign.repository';
 import { CampaignFundRepository } from '../repositories/campaign-fund.repository';
 import { CampaignFundService } from './campaign-fund.service';
+import { CheckoutLockService } from './checkout-lock.service';
 import { CampaignService } from './campaign.service';
 import { OrganizationService } from './organization.service';
 import { DonationService } from './donation.service';
@@ -90,6 +91,11 @@ export const paymentGateway = new PaystackGateway();
 export const transactionRepository = new TransactionRepository();
 export const webhookLogRepository = new WebhookLogRepository();
 
+// Shared instance: the checkout lock now spans the whole payment attempt, so both sides of
+// its lifecycle need the same one — OrderService acquires it at checkout and releases it on
+// cancel, PaymentService releases it when a webhook resolves the payment either way.
+export const checkoutLockService = new CheckoutLockService(new RedisLock());
+
 export const paymentService = new PaymentService(
   paymentGateway,
   transactionRepository,
@@ -99,10 +105,9 @@ export const paymentService = new PaymentService(
   userRepository,
   emailProvider,
   campaignRepository,
-  campaignFundService
+  campaignFundService,
+  checkoutLockService
 );
-
-export const checkoutLock = new RedisLock();
 
 export const orderService = new OrderService(
   orderRepository,
@@ -110,7 +115,7 @@ export const orderService = new OrderService(
   productRepository,
   userRepository,
   paymentService,
-  checkoutLock,
+  checkoutLockService,
   transactionRepository
 );
 

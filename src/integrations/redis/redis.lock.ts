@@ -17,10 +17,16 @@ end
 // any future flow needing "only one of these in flight per key" (e.g. a future donation
 // or admin-action idempotency guard) can reuse this directly.
 export class RedisLock {
-  // Returns an opaque token to pass to release() if acquired, or null if the key is
-  // already locked. Never queues/waits — the caller decides how to respond to contention.
-  async acquire(key: string, ttlSeconds: number): Promise<string | null> {
-    const token = randomUUID();
+  // Returns the token to pass to release() if acquired, or null if the key is already
+  // locked. Never queues/waits — the caller decides how to respond to contention.
+  //
+  // `token` is optional and defaults to a random UUID (the original behaviour). A caller
+  // may supply its own deterministic token when the lock has to be released by a
+  // *different* request than the one that took it — a webhook, say — which otherwise has
+  // no way to learn a randomly generated token. Supplying a value the releaser can
+  // independently reconstruct keeps the ownership guarantee below intact: a stale releaser
+  // presenting an old token still cannot delete a newer holder's lock.
+  async acquire(key: string, ttlSeconds: number, token: string = randomUUID()): Promise<string | null> {
     const result = await redis.set(key, token, 'EX', ttlSeconds, 'NX');
     return result === 'OK' ? token : null;
   }

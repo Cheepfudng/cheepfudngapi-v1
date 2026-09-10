@@ -16,6 +16,7 @@ import { IOrder } from '../models/order.model';
 import { ITransaction } from '../models/transaction.model';
 import { IWebhookLog } from '../models/webhook-log.model';
 import { CampaignFundService } from './campaign-fund.service';
+import { CheckoutLockService } from './checkout-lock.service';
 import { CampaignRepository } from '../repositories/campaign.repository';
 import { CartRepository } from '../repositories/cart.repository';
 import { OrderRepository } from '../repositories/order.repository';
@@ -36,7 +37,8 @@ export class PaymentService {
     private readonly userRepository: UserRepository,
     private readonly emailProvider: EmailProvider,
     private readonly campaignRepository: CampaignRepository,
-    private readonly campaignFundService: CampaignFundService
+    private readonly campaignFundService: CampaignFundService,
+    private readonly checkoutLock: CheckoutLockService
   ) {}
 
   async initializeDonationPayment(
@@ -183,6 +185,14 @@ export class PaymentService {
       PaymentStatus.COMPLETED
     );
 
+    // The payment attempt this checkout lock was covering is now resolved, so the buyer is
+    // free to start a new one. For a product purchase the transaction reference IS the
+    // checkoutReference (see initializeCheckoutPayment), which is also the lock's token.
+    // Released only after the orders actually reached COMPLETED above — deliberately not
+    // on the amount-mismatch path earlier, where the money is in limbo pending manual
+    // review and letting the buyer start another checkout would make that worse.
+    await this.checkoutLock.release(transaction.payer.toString(), reference);
+
     const buyer = await this.userRepository.findById(transaction.payer.toString());
     if (buyer) {
       await this.cartRepository.deleteByUser(buyer._id.toString());
@@ -236,6 +246,10 @@ export class PaymentService {
       PaymentStatus.FAILED,
       OrderStatus.CANCELLED
     );
+
+    // Payment attempt is over — stock is back and the orders are cancelled, so the buyer
+    // should be able to retry immediately rather than wait out the lock's TTL.
+    await this.checkoutLock.release(transaction.payer.toString(), reference);
   }
 
   // Records the donation against the CampaignFund/Campaign (its own Mongo transaction,

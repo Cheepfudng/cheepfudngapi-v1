@@ -3,7 +3,6 @@ import mongoose, { Types } from 'mongoose';
 import { env } from '../config/env';
 import { AppError } from '../errors/app-error';
 import { ErrorCode } from '../errors/error-codes';
-import { RedisLock } from '../integrations/redis/redis.lock';
 import { IOrder } from '../models/order.model';
 import { IProduct } from '../models/product.model';
 import { CartRepository } from '../repositories/cart.repository';
@@ -11,6 +10,7 @@ import { OrderPagination, OrderRepository } from '../repositories/order.reposito
 import { ProductRepository } from '../repositories/product.repository';
 import { TransactionRepository } from '../repositories/transaction.repository';
 import { UserRepository } from '../repositories/user.repository';
+import { CheckoutLockService } from './checkout-lock.service';
 import { PaymentService } from './payment.service';
 import {
   CancellationReason,
@@ -23,8 +23,6 @@ import {
 import { DELIVERY_FEE_NGN } from '../utils/constants';
 import { logger } from '../utils/logger';
 import { generateCheckoutReference, generateOrderNumber } from '../utils/reference-generator';
-
-const CHECKOUT_LOCK_TTL_SECONDS = 60;
 
 export interface CheckoutInput {
   addressId: string;
@@ -69,19 +67,31 @@ export class OrderService {
     private readonly productRepository: ProductRepository,
     private readonly userRepository: UserRepository,
     private readonly paymentService: PaymentService,
-    private readonly checkoutLock: RedisLock,
+    private readonly checkoutLock: CheckoutLockService,
     private readonly transactionRepository: TransactionRepository
   ) {}
 
   async checkout(buyerId: string, input: CheckoutInput): Promise<CheckoutResult> {
-    // One checkout in flight per buyer at a time — a rapid double-submit (slow network
-    // retry, accidental double-tap) must never be able to create two order sets against
-    // the same cart. Rejected immediately, never queued.
-    const lockKey = `checkout:lock:${buyerId}`;
-    const lockToken = await this.checkoutLock.acquire(lockKey, CHECKOUT_LOCK_TTL_SECONDS);
-    if (!lockToken) {
+    // One checkout per buyer at a time, held for the WHOLE payment attempt — not just for
+    // the duration of this request. Releasing as soon as the paymentUrl was returned still
+    // let a *sequential* retry (reach Paystack, back out, try again minutes later) create a
+    // second real order against the same cart, since the cart deliberately isn't cleared
+    // until payment confirms. See CheckoutLockService for who releases it and when.
+    //
+    // Generated up front rather than inside the transaction below because it doubles as
+    // the lock token, and the lock has to exist before any order does.
+    const checkoutReference = generateCheckoutReference();
+
+    const acquired = await this.checkoutLock.acquire(buyerId, checkoutReference);
+    if (!acquired) {
       throw new AppError('A checkout is already in progress', 409, ErrorCode.CONFLICT);
     }
+
+    // Only a checkout that actually creates orders and returns a real paymentUrl keeps the
+    // lock past this request. Every failure path below — empty cart, stock shortage,
+    // Paystack init failure — falls through to the finally and releases immediately, so a
+    // failed attempt never blocks the buyer's next legitimate one.
+    let retainLockForPayment = false;
 
     try {
       const buyer = await this.userRepository.findById(buyerId);
@@ -102,12 +112,14 @@ export class OrderService {
       // Stage A (transactional): cart validation, per-item atomic stock decrement, and
       // per-seller Order creation all commit or roll back together via a real Mongo
       // transaction — no manual compensating rollback needed for this DB-only portion.
-      let checkoutReference = '';
       const createdOrders: IOrder[] = [];
       const session = await mongoose.startSession();
       try {
         await session.withTransaction(async () => {
-          checkoutReference = '';
+          // withTransaction may re-run this callback on a transient error, so anything
+          // accumulated here has to be reset. checkoutReference is deliberately NOT reset
+          // or regenerated — it identifies this checkout attempt (and holds its lock), and
+          // a retried transaction is still the same attempt.
           createdOrders.length = 0;
 
           const cart = await this.cartRepository.findByUser(buyerId, session);
@@ -169,7 +181,6 @@ export class OrderService {
             bySeller.get(sellerId)!.push(resolved);
           }
 
-          checkoutReference = generateCheckoutReference();
           for (const items of bySeller.values()) {
             const orderItems = items.map(({ product, quantity }) => ({
               product: product._id,
@@ -219,6 +230,11 @@ export class OrderService {
         // Cart is deliberately NOT cleared here — only once processSuccessfulPayment
         // confirms payment actually went through. Clearing it now and having payment fail
         // would lose the buyer's cart for nothing.
+        //
+        // That surviving cart is exactly why the lock now outlives this request: without
+        // it, the buyer could check out the same still-populated cart again and create a
+        // genuine second order.
+        retainLockForPayment = true;
         return { orders: createdOrders, paymentUrl: authorizationUrl, checkoutReference };
       } catch (error) {
         logger.error(`Checkout failed after stock reservation for buyer ${buyerId}: ${error}`);
@@ -239,7 +255,11 @@ export class OrderService {
         );
       }
     } finally {
-      await this.checkoutLock.release(lockKey, lockToken);
+      // Held deliberately on the success path — released by the webhook, by cancel(), or
+      // by its TTL. Everything else releases here so a failed attempt blocks nothing.
+      if (!retainLockForPayment) {
+        await this.checkoutLock.release(buyerId, checkoutReference);
+      }
     }
   }
 
@@ -261,6 +281,13 @@ export class OrderService {
       cancellationReason: CancellationReason.BUYER_REQUESTED,
     });
     if (!updated) throw new AppError('Order not found', 404, ErrorCode.ORDER_NOT_FOUND);
+
+    // A deliberate change of mind shouldn't cost the buyer a 15-minute wait before they can
+    // check out again. Safe for a multi-seller checkout too: the whole group shares one
+    // Paystack transaction, so cancelling any sibling ends that payment attempt anyway, and
+    // the reference-as-token means this can only ever release THIS checkout's lock — never
+    // a newer one the buyer has since started.
+    await this.checkoutLock.release(refId(order.buyer).toString(), order.checkoutReference);
 
     return updated;
   }

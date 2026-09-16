@@ -4,10 +4,16 @@ import { AppError } from '../errors/app-error';
 import { ErrorCode } from '../errors/error-codes';
 import { DocumentStorage } from '../integrations/contracts/document-storage.interface';
 import { IProduct } from '../models/product.model';
-import { PUBLIC_SELLER_FIELDS, ProductRepository } from '../repositories/product.repository';
+import {
+  AdminProductFilter,
+  PUBLIC_SELLER_FIELDS,
+  ProductRepository,
+} from '../repositories/product.repository';
 import { UserRepository } from '../repositories/user.repository';
 import { OrganizationType, ProductModerationStatus, UserRole, VerificationStatus } from '../types/enums';
+import { logger } from '../utils/logger';
 import { buildPaginationMeta, parsePagination } from '../utils/pagination';
+import { parseOptionalBoolean } from '../utils/query-parsers';
 
 export interface ListProductsQuery {
   category?: string;
@@ -17,6 +23,13 @@ export interface ListProductsQuery {
   maxPrice?: string;
   search?: string;
   sort?: string;
+  page?: string;
+  limit?: string;
+}
+
+export interface ListMyProductsQuery {
+  moderationStatus?: string;
+  isActive?: string;
   page?: string;
   limit?: string;
 }
@@ -39,6 +52,7 @@ export interface CreateProductInput {
 
 export interface UpdateProductInput {
   name?: string;
+  category?: string;
   description?: string;
   price?: number;
   unit?: string;
@@ -94,6 +108,34 @@ export class ProductService {
     const { page, limit } = parsePagination(query);
 
     const { items, total } = await this.productRepository.findMany(filter, { page, limit, sort });
+
+    return { products: items, meta: buildPaginationMeta(page, limit, total) };
+  }
+
+  // A seller's own view of their listings — unlike listProducts above (public browse,
+  // always approved + active), this deliberately applies NO default status/isActive
+  // filtering at all: a seller needs to see pending/rejected/deactivated products too, not
+  // just what's publicly visible. moderationStatus/isActive are opt-in filters the seller
+  // can apply to their own view, not a floor enforced on every request. Reuses the existing
+  // admin query shape (findManyAdmin/AdminProductFilter) rather than inventing a parallel
+  // one, since "no restrictive filtering, optional explicit ones" is exactly what admin's
+  // product listing already does — this just pins sellerId to the caller instead of
+  // accepting it as an admin-supplied filter.
+  async listMyProducts(sellerId: string, query: ListMyProductsQuery) {
+    const { page, limit } = parsePagination(query);
+
+    const filter: AdminProductFilter = { sellerId };
+    if (query.moderationStatus) {
+      filter.moderationStatus = query.moderationStatus as ProductModerationStatus;
+    }
+    const isActive = parseOptionalBoolean(query.isActive);
+    if (isActive !== undefined) filter.isActive = isActive;
+
+    const { items, total } = await this.productRepository.findManyAdmin(filter, {
+      page,
+      limit,
+      sort: SORT_OPTIONS.newest,
+    });
 
     return { products: items, meta: buildPaginationMeta(page, limit, total) };
   }
@@ -166,7 +208,8 @@ export class ProductService {
   async updateProduct(
     productId: string,
     userId: string,
-    updates: UpdateProductInput
+    updates: UpdateProductInput,
+    files: Express.Multer.File[] = []
   ): Promise<IProduct> {
     const product = await this.getOwnedProduct(productId, userId);
 
@@ -180,10 +223,45 @@ export class ProductService {
       );
     }
 
-    // TODO: support replacing product images here, same upload pattern as createProduct.
-    const updated = await this.productRepository.updateById(productId, updates);
+    const finalUpdates: Partial<IProduct> = { ...updates };
+
+    // A new images array in the request replaces the whole set (same "one full set at a
+    // time" semantics as createProduct) -- no files means the existing images are left
+    // exactly as they are, same as every other omitted field.
+    if (files.length > 0) {
+      const oldImages = product.images;
+
+      finalUpdates.images = await Promise.all(
+        files.map(async (file) => {
+          const result = await this.productImageStorage.upload(file.buffer, {
+            folder: 'cheepfud/products',
+            resourceType: 'image',
+          });
+          return { url: result.url, publicId: result.publicId };
+        })
+      );
+
+      // Best-effort cleanup of the now-orphaned old images. The new set is already live at
+      // this point regardless of whether this succeeds -- a stray old Cloudinary asset is a
+      // cleanup/cost concern, never a reason to fail an otherwise-successful update.
+      if (oldImages.length > 0) {
+        try {
+          await Promise.all(
+            oldImages.map((image) => this.productImageStorage.delete(image.publicId, 'image'))
+          );
+        } catch (error) {
+          logger.error(`Failed to clean up old images for product ${productId}: ${error}`);
+        }
+      }
+    }
+
+    const updated = await this.productRepository.updateById(productId, finalUpdates);
     if (!updated) throw new AppError('Product not found', 404, ErrorCode.PRODUCT_NOT_FOUND);
     return updated;
+  }
+
+  async getMyProductById(productId: string, sellerId: string): Promise<IProduct> {
+    return this.getOwnedProduct(productId, sellerId);
   }
 
   async deleteProduct(productId: string, userId: string): Promise<void> {

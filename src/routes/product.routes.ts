@@ -10,6 +10,7 @@ import {
 import { validateRequest } from '../middleware/validation.middleware';
 import {
   createProductValidation,
+  listMyProductsValidation,
   listProductsValidation,
   productIdParamValidation,
   updateProductValidation,
@@ -19,6 +20,30 @@ import { asyncHandler } from '../utils/async-handler';
 const router = Router();
 
 router.get('/', listProductsValidation, validateRequest, asyncHandler(productController.list));
+
+// Must be registered before GET /:id — otherwise Express would match "mine" as the :id
+// param and fail isMongoId validation before ever reaching this handler.
+router.get(
+  '/mine',
+  asyncHandler(protect),
+  requireVerifiedOrganization,
+  requireSupplyOrganization,
+  listMyProductsValidation,
+  validateRequest,
+  asyncHandler(productController.listMine)
+);
+
+// Must also be registered before GET /:id, same reasoning as /mine above.
+router.get(
+  '/mine/:id',
+  asyncHandler(protect),
+  requireVerifiedOrganization,
+  requireSupplyOrganization,
+  productIdParamValidation,
+  validateRequest,
+  asyncHandler(productController.getMine)
+);
+
 router.get(
   '/:id',
   productIdParamValidation,
@@ -37,10 +62,15 @@ router.post(
   asyncHandler(productController.create)
 );
 
+// uploadProductImages (multer) only activates for multipart/form-data requests -- a plain
+// JSON request (the existing contract for every other field) is untouched, since multer
+// simply calls next() when the Content-Type isn't multipart. This is what lets images stay
+// optional on update without breaking every existing JSON-only caller.
 router.put(
   '/:id',
   asyncHandler(protect),
   productIdParamValidation,
+  uploadProductImages,
   updateProductValidation,
   validateRequest,
   asyncHandler(productController.update)

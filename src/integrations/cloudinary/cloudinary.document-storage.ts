@@ -17,4 +17,8 @@ export class CloudinaryDocumentStorage implements DocumentStorage {
       stream.end(fileBuffer);
     });
   }
+
+  async delete(publicId: string, resourceType: 'image' | 'raw' | 'auto'): Promise<void> {
+    await cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
+  }
 }

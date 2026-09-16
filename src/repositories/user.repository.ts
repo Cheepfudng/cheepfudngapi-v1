@@ -89,6 +89,15 @@ export class UserRepository {
     });
   }
 
+  // Recipient list for platform-level anomaly notifications (e.g. PaymentService's
+  // payment-received-for-a-cancelled-order guard) — there's no fixed "admin inbox" config
+  // in this codebase (admin access is role-based, granted manually in the DB per-user, not
+  // a single address), so every currently-active admin gets notified rather than relying on
+  // a config value that could go stale as admins are added/removed.
+  async findActiveAdmins(): Promise<IUser[]> {
+    return UserModel.find({ role: UserRole.ADMIN, isActive: true });
+  }
+
   async findByEmail(email: string): Promise<IUser | null> {
     return UserModel.findOne({
       email: email.toLowerCase().trim(),

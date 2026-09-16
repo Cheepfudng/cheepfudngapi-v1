@@ -52,7 +52,42 @@ export interface IOrder extends Document {
   proofOfDeliveryImages: IOrderProofImage[];
   createdAt: Date;
   updatedAt: Date;
+  // Virtual, not a stored field — a single human-readable label derived server-side from
+  // (paymentStatus, orderStatus) so every client (mobile, admin) shows the same wording
+  // without independently re-deriving it. See getOrderDisplayStatus below.
+  readonly displayStatus?: string;
 }
+
+// (paymentStatus, orderStatus) -> one label every client renders identically. Keyed on both
+// fields together, not orderStatus alone, specifically so the completed+cancelled
+// combination — payment received for an order the system has already discarded (see the
+// payment-anomaly guard in PaymentService.processSuccessfulPayment) — can be shown
+// distinctly from a normal cancellation instead of looking identical to one.
+const DISPLAY_STATUS_MAP: Record<string, string> = {
+  [`${PaymentStatus.PENDING}:${OrderStatus.PENDING}`]: 'Awaiting Payment',
+  [`${PaymentStatus.COMPLETED}:${OrderStatus.PENDING}`]:
+    'Payment Received — Awaiting Seller Confirmation',
+  [`${PaymentStatus.COMPLETED}:${OrderStatus.CONFIRMED}`]: 'Order Confirmed',
+  [`${PaymentStatus.COMPLETED}:${OrderStatus.PREPARING}`]: 'Preparing',
+  [`${PaymentStatus.COMPLETED}:${OrderStatus.IN_TRANSIT}`]: 'On the Way',
+  [`${PaymentStatus.COMPLETED}:${OrderStatus.DELIVERED}`]: 'Delivered',
+  [`${PaymentStatus.PENDING}:${OrderStatus.CANCELLED}`]: 'Cancelled',
+  [`${PaymentStatus.FAILED}:${OrderStatus.CANCELLED}`]: 'Cancelled',
+  // Anomalous — should only ever occur via the race the payment-anomaly guard flags for
+  // manual review. Deliberately worded and styled differently from a normal "Cancelled" so
+  // it never reads as an ordinary, already-resolved cancellation.
+  [`${PaymentStatus.COMPLETED}:${OrderStatus.CANCELLED}`]: 'Payment Issue — Contact Support',
+};
+
+export const getOrderDisplayStatus = (
+  paymentStatus: PaymentStatus,
+  orderStatus: OrderStatus
+): string =>
+  DISPLAY_STATUS_MAP[`${paymentStatus}:${orderStatus}`] ??
+  // Fallback for a combination not in the table above — e.g. paymentStatus not yet caught
+  // up with an orderStatus a seller advanced early. Not expected in normal operation, but
+  // never silently returns undefined for an unanticipated pairing.
+  `${orderStatus} (payment ${paymentStatus})`;
 
 const orderItemSchema = new Schema<IOrderItem>(
   {
@@ -126,5 +161,14 @@ orderSchema.index({ buyer: 1 });
 orderSchema.index({ 'items.seller': 1 });
 orderSchema.index({ orderStatus: 1 });
 orderSchema.index({ checkoutReference: 1 });
+
+// Computed once here rather than by every endpoint that returns an Order (checkout,
+// buyer/seller/admin lists, detail, cancel, confirm-delivery, status-update) — `virtuals:
+// true` is what makes it actually appear in the JSON every one of those sends back, since
+// res.json() invokes .toJSON() on any Mongoose document it serializes.
+orderSchema.virtual('displayStatus').get(function (this: IOrder) {
+  return getOrderDisplayStatus(this.paymentStatus, this.orderStatus);
+});
+orderSchema.set('toJSON', { virtuals: true });
 
 export const OrderModel = model<IOrder>('Order', orderSchema);

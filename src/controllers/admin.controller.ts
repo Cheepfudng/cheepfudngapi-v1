@@ -3,6 +3,7 @@ import { Response } from 'express';
 import { adminService, orderService } from '../services/service-container';
 import { sendSuccess } from '../utils/api-response';
 import { buildPaginationMeta, parsePagination } from '../utils/pagination';
+import { parseOptionalBoolean } from '../utils/query-parsers';
 import { AuthRequest } from '../types/auth.types';
 import {
   CampaignStatus,
@@ -12,11 +13,6 @@ import {
   UserRole,
   VerificationStatus,
 } from '../types/enums';
-
-const parseOptionalBoolean = (value: unknown): boolean | undefined => {
-  if (value === undefined) return undefined;
-  return value === 'true' || value === true;
-};
 
 export class AdminController {
   listOrganizations = async (req: AuthRequest, res: Response): Promise<Response> => {

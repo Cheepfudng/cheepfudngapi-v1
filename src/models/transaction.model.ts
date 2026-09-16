@@ -1,6 +1,6 @@
 import { Document, Schema, Types, model } from 'mongoose';
 
-import { PaymentStatus, TransactionType } from '../types/enums';
+import { PaymentStatus, TransactionAnomalyType, TransactionType } from '../types/enums';
 
 export interface ITransaction extends Document {
   transactionReference: string;
@@ -16,6 +16,11 @@ export interface ITransaction extends Document {
   // Raw Paystack payload (init response and/or webhook event) — kept for debugging,
   // never used as the source of truth for anything beyond that.
   gatewayResponse?: unknown;
+  // Set only when PaymentService.processSuccessfulPayment detects payment completed against
+  // an order already cancelled (see TransactionAnomalyType) — a visible "needs manual
+  // review" marker, not a second status field competing with `status` above.
+  anomalyType?: TransactionAnomalyType;
+  anomalyDetectedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -38,6 +43,8 @@ const transactionSchema = new Schema<ITransaction>(
     relatedOrders: [{ type: Schema.Types.ObjectId, ref: 'Order' }],
     relatedCampaign: { type: Schema.Types.ObjectId, ref: 'Campaign' },
     gatewayResponse: { type: Schema.Types.Mixed },
+    anomalyType: { type: String, enum: Object.values(TransactionAnomalyType) },
+    anomalyDetectedAt: { type: Date },
   },
   { timestamps: true }
 );

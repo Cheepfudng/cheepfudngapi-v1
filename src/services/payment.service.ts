@@ -12,6 +12,7 @@ import { createOrderConfirmationEmailTemplate } from '../integrations/brevo/temp
 import { createDonationConfirmationEmailTemplate } from '../integrations/brevo/templates/donation-confirmation-email.template';
 import { createNewDonationEmailTemplate } from '../integrations/brevo/templates/new-donation-email.template';
 import { createDonationFailedEmailTemplate } from '../integrations/brevo/templates/donation-failed-email.template';
+import { createPaymentAnomalyEmailTemplate } from '../integrations/brevo/templates/payment-anomaly-email.template';
 import { IOrder } from '../models/order.model';
 import { ITransaction } from '../models/transaction.model';
 import { IWebhookLog } from '../models/webhook-log.model';
@@ -23,7 +24,13 @@ import { OrderRepository } from '../repositories/order.repository';
 import { TransactionRepository } from '../repositories/transaction.repository';
 import { UserRepository } from '../repositories/user.repository';
 import { WebhookLogRepository } from '../repositories/webhook-log.repository';
-import { CampaignStatus, OrderStatus, PaymentStatus, TransactionType } from '../types/enums';
+import {
+  CampaignStatus,
+  OrderStatus,
+  PaymentStatus,
+  TransactionAnomalyType,
+  TransactionType,
+} from '../types/enums';
 import { DONATION_MINIMUM_KOBO, MEAL_COST_NGN } from '../utils/constants';
 import { generateDonationReference } from '../utils/reference-generator';
 
@@ -180,17 +187,59 @@ export class PaymentService {
       return;
     }
 
-    await this.orderRepository.updatePaymentStatusForOrders(
-      transaction.relatedOrders,
-      PaymentStatus.COMPLETED
+    // Guard against silently completing an order the system has already discarded.
+    // Cancelling an order (buyer-initiated, or auto-expiry) never invalidates its Paystack
+    // checkout page — Paystack has no API to void/expire a reference early (confirmed
+    // against their docs: the Transaction API only has Initialize/Verify/List/Fetch/Charge
+    // Authorization/Timeline/Totals/Export/Partial Debit, nothing to cancel a reference), so
+    // a stale-but-still-live link can genuinely be paid for real after its order is gone.
+    // This can't be prevented up front, only caught here.
+    //
+    // Orders already `cancelled` still get their `paymentStatus` flipped to `completed`
+    // below — that field just records the fact that money WAS received for this specific
+    // order, which is true regardless of its fulfillment fate — but their `orderStatus`
+    // stays `cancelled` (fulfillment never proceeds: no seller notification, no "your order
+    // is confirmed" email). The (completed, cancelled) combination this produces is exactly
+    // what the displayStatus mapping below flags distinctly ("Payment Issue — Contact
+    // Support") rather than looking like an ordinary resolved cancellation — this is the
+    // primary way the anomaly stays visible to anyone who looks at the order at all (buyer's
+    // own order list, admin's), not just in a Transaction record with no dedicated admin UI.
+    const orders = await this.orderRepository.findByIds(
+      transaction.relatedOrders.map((id) => id.toString())
     );
+    const cancelledOrders = orders.filter((order) => order.orderStatus === OrderStatus.CANCELLED);
+    const activeOrders = orders.filter((order) => order.orderStatus !== OrderStatus.CANCELLED);
 
-    // The payment attempt this checkout lock was covering is now resolved, so the buyer is
+    if (cancelledOrders.length > 0) {
+      logger.error(
+        `PAYMENT ANOMALY: transaction ${reference} completed but ${cancelledOrders.length} of its order(s) were already cancelled (${cancelledOrders
+          .map((order) => order.orderNumber)
+          .join(', ')}) — paymentStatus marked completed for visibility, orderStatus left cancelled, flagged for manual review.`
+      );
+      // orderStatus is deliberately omitted here (only paymentStatus is set) — fulfillment
+      // must never proceed for these, only the financial record is corrected to match reality.
+      await this.orderRepository.updatePaymentStatusForOrders(
+        cancelledOrders.map((order) => order._id),
+        PaymentStatus.COMPLETED
+      );
+      await this.transactionRepository.updateByReference(reference, {
+        anomalyType: TransactionAnomalyType.PAID_AFTER_ORDER_CANCELLED,
+        anomalyDetectedAt: new Date(),
+      });
+      await this.notifyAdminsOfPaymentAnomaly(transaction, cancelledOrders);
+    }
+
+    if (activeOrders.length > 0) {
+      // Atomic per-document guard (orderStatus: { $ne: cancelled }) closes the tiny race
+      // window between the read above and this write — a cancellation landing in between
+      // still can't be silently completed.
+      await this.orderRepository.completeActiveOrders(activeOrders.map((order) => order._id));
+    }
+
+    // The payment attempt this checkout lock was covering is resolved either way — paid,
+    // whether or not part of it turned out to be the anomalous case above. The buyer is
     // free to start a new one. For a product purchase the transaction reference IS the
     // checkoutReference (see initializeCheckoutPayment), which is also the lock's token.
-    // Released only after the orders actually reached COMPLETED above — deliberately not
-    // on the amount-mismatch path earlier, where the money is in limbo pending manual
-    // review and letting the buyer start another checkout would make that worse.
     await this.checkoutLock.release(transaction.payer.toString(), reference);
 
     const buyer = await this.userRepository.findById(transaction.payer.toString());
@@ -198,16 +247,65 @@ export class PaymentService {
       await this.cartRepository.deleteByUser(buyer._id.toString());
     }
 
-    // Payment has already succeeded at this point — an email failure must never appear to
-    // the caller as a payment failure, so it's caught and logged, never rethrown.
+    // Only orders that actually, validly completed get a "your order is confirmed" email —
+    // never one of the cancelled-but-anomalously-paid orders flagged above. Payment has
+    // already succeeded at this point — an email failure must never appear to the caller as
+    // a payment failure, so it's caught and logged, never rethrown.
     try {
       await this.sendOrderEmails(
-        transaction.relatedOrders.map((id) => id.toString()),
+        activeOrders.map((order) => order._id.toString()),
         buyer?.email,
         buyer?.firstName
       );
     } catch (error) {
       logger.error(`Failed to send order confirmation emails for ${reference}: ${error}`);
+    }
+  }
+
+  // Never lets a notification failure surface as anything the caller (the webhook handler)
+  // treats as a payment failure — same defensive pattern as sendOrderEmails/the donation
+  // emails below. If there's currently no active admin at all, this still logs loudly at
+  // error level so the anomaly isn't completely silent even without an email recipient.
+  private async notifyAdminsOfPaymentAnomaly(
+    transaction: ITransaction,
+    cancelledOrders: IOrder[]
+  ): Promise<void> {
+    try {
+      const [admins, buyer] = await Promise.all([
+        this.userRepository.findActiveAdmins(),
+        this.userRepository.findById(transaction.payer.toString()),
+      ]);
+
+      if (admins.length === 0) {
+        logger.error(
+          `PAYMENT ANOMALY on transaction ${transaction.transactionReference}: no active admin user exists to notify by email — needs manual review via direct DB/admin-panel access.`
+        );
+        return;
+      }
+
+      const htmlContent = createPaymentAnomalyEmailTemplate({
+        transactionReference: transaction.transactionReference,
+        amount: transaction.amount,
+        buyerEmail: buyer?.email ?? 'unknown',
+        orders: cancelledOrders.map((order) => ({
+          orderNumber: order.orderNumber,
+          total: order.total,
+        })),
+      });
+
+      await Promise.all(
+        admins.map((admin) =>
+          this.emailProvider.sendEmail({
+            to: admin.email,
+            subject: 'ACTION REQUIRED: Payment received for a cancelled order',
+            htmlContent,
+          })
+        )
+      );
+    } catch (error) {
+      logger.error(
+        `Failed to notify admins of payment anomaly for ${transaction.transactionReference}: ${error}`
+      );
     }
   }
 
@@ -237,8 +335,32 @@ export class PaymentService {
       transaction.relatedOrders.map((id) => id.toString())
     );
 
+    // Stock is only restored for orders NOT already cancelled. A cancellation
+    // (buyer-initiated or auto-expiry) already restored this order's stock at the moment it
+    // happened; a late/stale charge.failed arriving afterward for the same order must not
+    // restore it a second time — that would inflate quantityAvailable beyond what actually
+    // exists (an overselling risk, not a lost-money one, so unlike the payment-anomaly fix
+    // above this doesn't need an anomalyType flag or an admin email — just a safe no-op on
+    // the redundant side effect). The webhook event itself is still fully recorded: the
+    // atomic claim above already flipped the Transaction to failed, and the
+    // paymentStatus/orderStatus update below still runs for every related order regardless
+    // (harmless/idempotent for an order that's already cancelled — orderStatus stays
+    // cancelled, paymentStatus lands on failed either way).
+    const alreadyCancelledOrders = orders.filter(
+      (order) => order.orderStatus === OrderStatus.CANCELLED
+    );
+    const restorableOrders = orders.filter((order) => order.orderStatus !== OrderStatus.CANCELLED);
+
+    if (alreadyCancelledOrders.length > 0) {
+      logger.info(
+        `charge.failed for ${reference}: ${alreadyCancelledOrders.length} order(s) already cancelled (${alreadyCancelledOrders
+          .map((order) => order.orderNumber)
+          .join(', ')}) — stock restoration skipped, already applied at cancellation.`
+      );
+    }
+
     await Promise.all(
-      orders.map((order) => this.orderRepository.restoreStockForItems(order.items))
+      restorableOrders.map((order) => this.orderRepository.restoreStockForItems(order.items))
     );
 
     await this.orderRepository.updatePaymentStatusForOrders(

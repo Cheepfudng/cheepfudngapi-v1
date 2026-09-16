@@ -87,3 +87,12 @@ export enum ProductModerationStatus {
   APPROVED = 'approved',
   REJECTED = 'rejected',
 }
+
+// Flags a Transaction whose payment resolved successfully (webhook success) after its
+// related order(s) had already reached a terminal cancelled state — Paystack has no way to
+// void/expire a checkout reference early, so a stale but still-live payment link can be
+// paid for real after the order it was for is already gone. Purely a "needs manual review"
+// marker; no automatic refund/reconciliation happens from this alone.
+export enum TransactionAnomalyType {
+  PAID_AFTER_ORDER_CANCELLED = 'paid_after_order_cancelled',
+}

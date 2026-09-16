@@ -45,8 +45,20 @@ export class DocumentService {
       );
     }
 
-    if (user.verificationStatus === VerificationStatus.VERIFIED) {
-      throw new AppError('Organization is already verified', 409, ErrorCode.CONFLICT);
+    // Only a first-ever submission (pending) or a legitimate resubmission after a rejection
+    // (rejected) may create documents. under_review already has a submission awaiting
+    // decision — a second call here previously just appended a duplicate set on top of it
+    // without rejecting, which is the bug this guard closes. verified needs its own message
+    // since "already under review" would be misleading once a decision has actually landed.
+    if (
+      user.verificationStatus === VerificationStatus.UNDER_REVIEW ||
+      user.verificationStatus === VerificationStatus.VERIFIED
+    ) {
+      const message =
+        user.verificationStatus === VerificationStatus.VERIFIED
+          ? 'Your organization is already verified'
+          : 'Your documents are already under review';
+      throw new AppError(message, 409, ErrorCode.CONFLICT);
     }
 
     if (!user.organizationType) {

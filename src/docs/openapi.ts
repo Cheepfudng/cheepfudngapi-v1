@@ -2221,6 +2221,123 @@ export const openApiDocument = {
         },
       },
     },
+    '/v1/products/mine': {
+      get: {
+        tags: ['Products'],
+        summary: "List the caller's own products (verified farmer/vendor organizations only)",
+        description:
+          "Middleware chain: protect -> requireVerifiedOrganization -> requireSupplyOrganization, same gating as product creation. Unlike GET /v1/products (public browse), this applies NO default isActive/moderationStatus filtering — a seller sees every product they've listed, including pending/rejected and deactivated ones, with rejectionReason visible where present. moderationStatus/isActive are optional filters the seller can apply to their own view. Always scoped to the authenticated user — there is no way to view another seller's products via this endpoint.",
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'moderationStatus',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', enum: Object.values(ProductModerationStatus) },
+          },
+          { name: 'isActive', in: 'query', required: false, schema: { type: 'boolean' } },
+          { name: 'page', in: 'query', required: false, schema: { type: 'integer', default: 1 } },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', default: 20, maximum: 50 },
+          },
+        ],
+        responses: {
+          200: {
+            description: "Caller's products retrieved",
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ProductListResponse' } },
+            },
+          },
+          400: {
+            description: 'Invalid query parameters',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          403: {
+            description: 'Organization not verified, or not a supply-side organization',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+                examples: {
+                  NotVerified: {
+                    value: {
+                      status: false,
+                      message:
+                        'Your organization is pending verification. Please complete document submission and wait for admin approval.',
+                      error: { code: ErrorCode.ORGANIZATION_NOT_VERIFIED },
+                    },
+                  },
+                  NotSupplyOrganization: {
+                    value: {
+                      status: false,
+                      message: 'Only farmer or vendor organizations can perform this action',
+                      error: { code: ErrorCode.SUPPLY_ORGANIZATION_REQUIRED },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/v1/products/mine/{id}': {
+      get: {
+        tags: ['Products'],
+        summary: "Get one of the caller's own products, regardless of status",
+        description:
+          "Unlike GET /v1/products/{id} (public, approved+active only, 404 otherwise), this returns the product regardless of moderationStatus/isActive as long as the caller owns it — the single-resource equivalent of GET /v1/products/mine. Same gating as product creation/listing (protect -> requireVerifiedOrganization -> requireSupplyOrganization).",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          200: {
+            description: 'Product retrieved',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ProductSuccessResponse' } },
+            },
+          },
+          401: {
+            description: 'Not authenticated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+          403: {
+            description: 'Organization not verified, not a supply-side organization, or not the owner of this product',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+                examples: {
+                  NotOwner: {
+                    value: {
+                      status: false,
+                      message: 'You do not have permission to modify this product',
+                      error: { code: ErrorCode.FORBIDDEN },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          404: {
+            description: 'Product not found',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+            },
+          },
+        },
+      },
+    },
     '/v1/products/{id}': {
       get: {
         tags: ['Products'],
@@ -2258,13 +2375,34 @@ export const openApiDocument = {
         tags: ['Products'],
         summary: 'Update a product (owner only)',
         description:
-          'seller cannot be changed. Image replacement is not supported by this endpoint yet.',
+          "seller cannot be changed. Accepts EITHER application/json (all fields except images) OR multipart/form-data (same fields as flat text fields, plus an optional images upload) — the images field only exists on the multipart form of the request, since it requires actual file uploads. Omitting a field leaves it unchanged; explicitly sending images replaces the product's entire image set (old Cloudinary assets are cleaned up on a best-effort basis) — there is no way to add/remove a single image, only replace the whole set at once, same as at creation.",
         security: [{ bearerAuth: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
         requestBody: {
           required: true,
           content: {
             'application/json': { schema: { $ref: '#/components/schemas/UpdateProductRequest' } },
+            'multipart/form-data': {
+              schema: {
+                type: 'object',
+                properties: {
+                  name: { type: 'string' },
+                  category: { type: 'string' },
+                  description: { type: 'string' },
+                  price: { type: 'number' },
+                  unit: { type: 'string' },
+                  quantityAvailable: { type: 'number' },
+                  minimumOrder: { type: 'number' },
+                  isActive: { type: 'boolean' },
+                  images: {
+                    type: 'array',
+                    items: { type: 'string', format: 'binary' },
+                    description:
+                      'Up to 5 JPG/PNG files, 10MB each. Replaces the entire existing image set.',
+                  },
+                },
+              },
+            },
           },
         },
         responses: {
@@ -4323,6 +4461,7 @@ export const openApiDocument = {
         type: 'object',
         properties: {
           name: { type: 'string' },
+          category: { type: 'string' },
           description: { type: 'string' },
           price: { type: 'number' },
           unit: { type: 'string' },
@@ -4564,6 +4703,12 @@ export const openApiDocument = {
             example: 'pending',
           },
           orderStatus: { type: 'string', enum: Object.values(OrderStatus), example: 'pending' },
+          displayStatus: {
+            type: 'string',
+            example: 'Awaiting Payment',
+            description:
+              'Computed server-side from (paymentStatus, orderStatus) so every client renders the same label without re-deriving it. Not stored — a virtual, present on every response that returns an Order. The completed+cancelled combination (payment received for an already-cancelled order — an anomaly flagged for manual review, see Transaction.anomalyType) renders distinctly as "Payment Issue — Contact Support" rather than looking like an ordinary cancellation.',
+          },
           cancellationReason: {
             type: 'string',
             enum: Object.values(CancellationReason),

@@ -108,6 +108,19 @@ export class OrderRepository {
     await OrderModel.updateMany({ _id: { $in: orderIds } }, { $set: update });
   }
 
+  // Used by PaymentService's payment-anomaly guard: flips paymentStatus to completed only
+  // for orders NOT already cancelled, in one atomic multi-document update. The guard's own
+  // read (checking which orders are already cancelled) happens moments earlier via
+  // findByIds — the `orderStatus: { $ne: CANCELLED }` guard here closes the race window
+  // between that read and this write for free, so a cancellation landing in between still
+  // can't be silently completed.
+  async completeActiveOrders(orderIds: (Types.ObjectId | string)[]): Promise<void> {
+    await OrderModel.updateMany(
+      { _id: { $in: orderIds }, orderStatus: { $ne: OrderStatus.CANCELLED } },
+      { $set: { paymentStatus: PaymentStatus.COMPLETED } }
+    );
+  }
+
   // Used only to unwind a checkout attempt that failed after orders were already created
   // (e.g. Paystack init failed) — a real, submitted-for-payment order is cancelled via
   // orderStatus, never deleted.
